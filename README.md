@@ -1,6 +1,4 @@
-# DeepOcean
-
-A Windows desktop app that blocks distracting folders, apps, and websites on a schedule.
+A blocker app, simply because no app provides real control over your system. work in the deep ocean.
 
 ## Download
 
