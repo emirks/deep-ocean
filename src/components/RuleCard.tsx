@@ -46,17 +46,25 @@ function nextScheduleText(rule: Rule): string {
   return `${daysLabel}  ${rule.schedules[0].lockTime}–${rule.schedules[0].unlockTime}`
 }
 
-/** Dot + label for a single target's live OS state */
+/** Dot + label + status text for a single target's live OS state */
 function TargetDot({ ts }: { ts: TargetStatus }) {
   return (
-    <div className="flex items-center gap-1.5 min-w-0">
+    <div className="flex items-center gap-2 min-w-0">
       <span className={cn(
         'flex-shrink-0 h-1.5 w-1.5 rounded-full',
-        ts.status === 'blocked'   && 'bg-red-400',
-        ts.status === 'unblocked' && 'bg-emerald-400',
+        ts.status === 'blocked'   && 'bg-emerald-400',
+        ts.status === 'unblocked' && 'bg-muted-foreground/40',
         ts.status === 'error'     && 'bg-orange-400'
       )} />
-      <span className="text-xs text-muted-foreground truncate font-mono">{ts.label}</span>
+      <span className="text-xs text-muted-foreground truncate font-mono flex-1">{ts.label}</span>
+      <span className={cn(
+        'flex-shrink-0 text-xs font-medium',
+        ts.status === 'blocked'   && 'text-emerald-400',
+        ts.status === 'unblocked' && 'text-muted-foreground/60',
+        ts.status === 'error'     && 'text-orange-400'
+      )}>
+        {ts.status === 'blocked' ? 'locked' : ts.status === 'unblocked' ? 'open' : 'error'}
+      </span>
     </div>
   )
 }
@@ -136,7 +144,7 @@ export function RuleCard({ rule }: Props) {
     <>
       <Card className={cn(
         'transition-all border',
-        rule.enabled  && rule.status === 'blocked'   && 'border-red-500/25 bg-red-950/10',
+        rule.enabled  && rule.status === 'blocked'   && 'border-emerald-500/25 bg-emerald-950/10',
         rule.enabled  && rule.status === 'locking'   && 'border-orange-500/25 bg-orange-950/10',
         rule.enabled  && rule.status === 'unlocking' && 'border-blue-500/25 bg-blue-950/10',
         !rule.enabled && 'border-border opacity-75',
