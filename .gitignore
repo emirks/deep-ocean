@@ -31,3 +31,17 @@ Thumbs.db
 # Temp
 *.tmp
 *.temp
+
+# SpecStory (local IDE / session data)
+.specstory/
+
+# Local env and secrets
+.env
+.env.local
+.env.*.local
+
+# Test / coverage
+coverage/
+
+# JetBrains
+.idea/
