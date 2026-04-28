@@ -3143,40 +3143,807 @@ You can open it any time in a text editor if you need to manually inspect or edi
 
 _**User**_
 
-it says active but there is block button? whats that!! already when its active it should block itself?? there should only be activate and deactivate the block, and deactivation should only be when the block is not locked, and when its locked make it unlockable with the gateways if exists! does that sync that? it does not automatically when i open the app while we are already in the active time! that should be fullly live and reliable, check the folder things continuously to check!!! or for optimization you can decide how to sync up! like when focused or sth idk
+it says active but there is block button? whats that!! already when its active it should block itself?? there should only be activate and deactivate the block, and deactivation should only be when the block is not locked, and when its locked make it unlockable with the gateways if exists! does that sync that? separate the activation deactivation and locking indicators, they are layered! Active & inactive is for actual blocks, lock is for manual change of active inactive! unlocking requires gateway!
+
+put indicators to that block card for each block like for each folder, and show the live status of that if that particular folder is locked or not! that should be fullly live and reliable, check the folder things continuously to check!!! or for optimization you can decide how to sync up! like when focused or sth idk
+
+
 
 ---
 
 _**Agent (claude-4.6-sonnet-medium-thinking)**_
 
 <think><details><summary>Thought Process</summary>
-The user is pointing out a UX/logic problem. Let me understand:
+Let me understand what the user is asking:
 
-1. **The terminology is confusing**: "Active" means the rule is enabled/active (unblocked state), but there's a "Block" button next to it. This is confusing - the user wants:
-   - A rule has a **schedule** - when within the schedule window, it should automatically be **blocked/locked**
-   - The UI should reflect the REAL state of whether things are blocked or not
-   - The button should show whether to **activate** (enable the block) or **deactivate** (disable the block)
+1. **Conceptual clarification**: The user wants to separate two different concepts:
+   - **Active/Inactive**: Whether the block rule is "on" or "off" (enabled/disabled). Active = the rule is running and enforcing blocks. Inactive = the rule is turned off and not blocking.
+   - **Locked/Unlocked**: The current state of the actual filesystem/OS lock. Locked = the folder/app/website is actually blocked at OS level. Unlocked = not blocked.
+   - **Gateway**: Required to change from Locked → Unlocked (manual unlock). Like a key.
 
-Wait, let me re-read. The user says:
+2. **Current confusion**: The current UI shows "ACTIVE" status badge and a "Block" button. 
+
+So the distinction is that "Active" should indicate whether the rule itself is enabled and will automatically lock/unlock based on schedule, while "Locked" should reflect the actual OS-level block status. The button needs to toggle the rule's activation state rather than directly controlling the lock, and when something is locked, users need to go through a gateway to manually unlock it.
+
+3. **Per-target status indicators**: Each folder/app/domain in the rule card should display its own live lock status at the OS level.
+
+4. **Continuous live sync**: I need to keep checking the actual folder/app/domain status to reflect real-time state, probably triggered on window focus or through periodic polling.
+
+The conceptual model separates the rule's enabled state from its actual OS status—enabled means the rule is active and will apply locks/unlocks per schedule, while the status tracks whether the OS block is currently applied, and gateways only come into play for manual unlocking, not for scheduled changes.
+
+For the UI, I'm thinking a toggle for Active/Inactive, a separate lock indicator showing the current OS state, and an unlock button that only appears when locked and requires a gateway if one exists. The tricky part is clarifying what happens when the rule is inactive—does it stay in its current locked/unlocked state or auto-unlock?
+
+Re-reading the user's clarification, I think I've got it now: Active means the block is applied (locked), Inactive means it's not applied (unlocked), and the lock icon represents a manual override that prevents changing between these states without a gateway. So it's really about the block status itself, not a separate scheduling layer. So the distinction is clear now: the status badge just shows whether the block is currently Active or Inactive, while the button handles the action (Activate/Deactivate). The lock icon is purely informational—it tells the user "this rule has a gateway attached"—not a separate control. When a rule is Active and has a gateway, deactivating it requires passing through that gateway first. These are three separate visual layers: the status indicator, the action button, and the lock badge.
+
+For folder rules with multiple paths, I need to display each path's individual lock status beneath the rule, showing which ones are currently locked or unlocked, along with when they'll unlock. The system should continuously monitor these statuses to keep the display up-to-date, or I could optimize by checking when the card is focused or visible.
+
+The tricky part is that `getStatus` currently returns a single status for the entire rule, but I need per-target status checks. I'm thinking through whether to add an `enabled` field to the Rule model or rename the existing status values from `blocked/unblocked` to something like `active/inactive` to better match what the user is asking for. I think I'm overcomplicating this. The user is saying Active/Inactive describes whether the block is actually applied, while Lock is specifically about whether manual changes require a gateway—so a rule could be Active+Locked (applied but needs gateway to turn off), Active+Unlocked (applied and freely toggleable), or just Inactive. From a UX perspective, showing "ACTIVE" with a "Block" button is confusing, so I need to rethink how these states map to the interface.
+
+The clearer approach is to show the rule status prominently (Active, Inactive, or transitioning states), add a small lock icon if gateways exist to indicate manual deactivation requires a phrase, and then have the action button change based on the current state—"Activate" when inactive, "Deactivate" when active without gateways, or "Deactivate" with a gateway prompt when active with gateways.
+
+For displaying per-target status, I'm thinking through whether to add a separate IPC call that fetches individual lock statuses for each folder, app, or domain, or if it makes more sense to bundle that data into the existing sync mechanism.
+
+Now I need to map out the full implementation: updating the RuleCard component to distinguish between active/inactive states and gateway access, adding per-target status indicators as small visual elements, and setting up periodic polling when the window regains focus to keep those statuses fresh. I'll also need to rename the StatusBadge component to better reflect what it's showing.
+
+For the backend, I'm adding IPC handlers and methods across the blocker classes to expose per-target status information, while keeping the internal `blocked/unblocked` terminology but surfacing it as `active/inactive` in the UI. The WebsiteBlocker class still needs its `getTargetStatuses` implementation to complete the pattern.
+
+Now I'm defining the data structure for target statuses—I need a `TargetStatus` interface that holds the display label and status for each individual target, then extend the base blocker interface to include this method.
+
+Implementing this in FolderBlocker...
+
+For WebsiteBlocker, I'm checking the hosts file to see if domain entries are already blocked, returning the status for each domain or an error if the file read fails.
+
+On the frontend side, I need to poll target statuses every 10 seconds while the window is focused, with an immediate check when focus returns. I'll create a Zustand store to track statuses per rule ID so multiple components can access the same data, then hook into the root layout to fetch these statuses alongside the rules sync.
+
+For the backend, I'm setting up an IPC handler that fetches target statuses for all rules in parallel, catching any errors gracefully so one rule's failure doesn't block the others.
+
+Now I need to implement the `getTargetStatuses` method across all the blocker classes and wire up the preload API so the renderer can call this from the UI.
+
+The trickiest part is redesigning the RuleCard component to show the overall rule status alongside individual target statuses in a collapsible layout. I'm clarifying the distinction between active and inactive states for the rule — I need to make sure the button behavior and gateway logic align correctly with what the backend considers "active." The badge and lock icon separation is already there—it's just the label that needs to change from `BLOCKED` to `ACTIVE`. For the polling, the user wants continuous checking, so I'll set up a system that fetches target statuses on mount, when the window regains focus, and then every 15 seconds while focused, clearing the interval when the window blurs. I'll add this logic to `__root.tsx` alongside the existing sync.
+
+Now I'm implementing everything, including handling transitional states in `getTargetStatuses` so the UI reflects what's actually happening with the rules.
+
+I'll add `getTargetStatuses` to the IBlocker interface for consistency, then start writing the implementation.</details></think>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="read" data-tool-name="read_file_v2">
+<details><summary>Tool use: **read_file_v2** • Read file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\electron\blockers\BlockerEngine.ts</summary>
+
+</details>
+</tool-use>
+
+<tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
+<summary>Tool use: **read_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="read" data-tool-name="read_file_v2">
+<details><summary>Tool use: **read_file_v2** • Read file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\src\components\SchedulePicker.tsx</summary>
+
+</details>
+</tool-use>
+
+<tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
+<summary>Tool use: **read_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<think><details><summary>Thought Process</summary>
+Now I have all the context I need. Let me plan the changes:
+
+### Conceptual Model (the user's intent):
+
+**Active** (status badge) = the OS block IS currently applied (what we call `blocked`)
+**Inactive** (status badge) = the OS block is NOT applied (what we call `unblocked`)
+
+**🔒 Lock indicator** = this rule has a gateway — manual deactivation requires completing the gateway (separate from the status)
+
+**Button** = "Activate" (when inactive) or "Deactivate" (when active — requires gateway if locked)
+
+**Per-target indicators** = for each folder/app/domain, show live individual status (🔴/🟢)
 
 
-- "it says active but there is block button" - the status says ACTIVE (meaning the rule is actively monitoring/enforcing) but there's a "Block" button suggesting it can be manually blocked
-- "already when its active it should block itself?" - I think the user is confused about what "Active" means
+I need to add a `TargetStatus` interface to the types, then implement a `getTargetStatuses` method across all the blocker classes to track individual target statuses, and wire it up through the BlockerEngine.
 
-Actually, I think the issue is:
-- The rule has a schedule "Unlocks today at 18:00" which means it's currently IN the locked window (between lockTime and 18:00). But the status shows "ACTIVE" (unblocked) instead of "BLOCKED"
-- This means the sync isn't working - the app opened, the rule should have automatically applied its schedule-based blocking, but it's still showing as active when it should be blocked
+Now I'm setting up the IPC layer to expose target statuses to the frontend, creating a store to manage polling, and redesigning the RuleCard to show per-target status with a cleaner layout—icon and name at the top with a status badge and gateway indicator, followed by the individual target statuses below. The polling strategy fetches on window focus and then every 10 seconds while the app is active, keeping things responsive without excessive requests.
 
-The real problem is the terminology and logic: the user wants a simpler model where rules are either enabled (will respect their schedule) or disabled (won't enforce anything), and when a rule is in its scheduled lock window, it should automatically block and show as locked with an unlock button that requires the gateway if configured. So the real issue is that "ACTIVE" is misleading—the user interprets it as "actively blocking" when it actually means the rule is enabled but currently not blocking. What they want is simpler: just activate/deactivate the rule itself, and let the schedule handle blocking automatically. When the schedule locks it, show a LOCKED state with an unlock button that respects the gateway if configured. The current model of manual blocking doesn't align with what they're asking for. to think "ACTIVE" means it's actively blocking. The real problem is that the rule shows "Unlocks today at 18:00" — meaning we're currently in the lock window — but displays as ACTIVE/unblocked, which is a sync failure. The terminology is also confusing: "ACTIVE" suggests blocking is happening, yet there's a manual Block button that contradicts the automatic scheduling. The app needs continuous syncing to verify the actual block state matches what's displayed.
+For the button states and colors, I'm weighing whether "Activate" should signal the protective action (blue/primary) or emphasize that it's applying a block (red/serious), and similarly whether "Deactivate" needs different styling when a gateway is involved to warn users about the phrase requirement. subtle "Deactivate" button (you DON'T want to hit this accidentally) + 🔒 if gateway required, and a modal confirmation if they try to deactivate with a gateway in place. For per-target status, I'm using colored circles to show whether each target is locked at the OS level (red), accessible (green), or still being checked (white). Now I'm setting up the polling logic to sync target statuses whenever the window regains focus...
 
-Now I'm looking at the specific bug: the `nextScheduleText()` function returns "Unlocks today at 18:00" when we're between lock and unlock times, which confirms we should be blocked, but the status shows unblocked instead. This points to either `getStatus` failing or `isWithinSchedule` not evaluating correctly during the sync.
+Setting up polling with visibility and focus events...</details></think>
 
-Looking at the startup reconciliation logic, if a rule is already marked unblocked but we're within a schedule window, it should trigger a block. The issue might be that `BlockerEngine.block()` is failing because the rule's paths are still in the old format from before the refactor, so the blocking operation never completes successfully.
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
 
-Actually, wait—we cleared the old rules, so this is a new rule created after the refactor with the correct `paths` array format. The real problem is likely that the dev server lacks admin privileges, so the `icacls` command fails silently, which means `getStatus` keeps returning 'unblocked' and the reconciliation loop never actually blocks the rule.
+Now I have the full picture. Let me plan exactly what changes:
 
-For the UX side, I'm realizing the status labels are confusing—"ACTIVE" doesn't clearly convey whether something is blocked or not. I should rethink the terminology to make it obvious what state the rule is in.
+**Conceptual model the user wants:**
+- `Active` / `Inactive` = is the OS block currently applied (rename from `blocked`/`unblocked` in UI only)
+- `🔒` = separate indicator meaning "gateway required to deactivate"  
+- Button = "Activate" / "Deactivate" (not "Block"/"Unlock")
+- Per-target dots = each folder/app/domain shows its own live OS state, polling every 10s while focused
 
-But stepping back, the user's core complaint is simpler: they see "ACTIVE" and expect the folder to already be blocked, so the "Block" button feels redundant. They want the interface to just show activate/deactivate controls, where enabling the rule automatically locks the folder during its schedule window. The status label needs to reflect the actual blocking state, not just whether the rule is enabled.
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
 
-And there's also a sync issue—when they open the app during active hours, the block isn't applying immediately, which breaks the expected behavior.</details></think>
+<tool-use data-tool-type="unknown" data-tool-name="todo_write">
+<details>
+<summary>Tool use: **todo_write**</summary>
+
+
+Parameters:
+
+```json
+{
+  "merge": true
+}
+```
+Result:
+
+```json
+{
+  "finalTodos": [
+    {
+      "content": "types/index.ts: add TargetStatus interface",
+      "id": "u1",
+      "status": "in_progress"
+    },
+    {
+      "content": "BaseBlocker + all 3 blockers + BlockerEngine: add getTargetStatuses()",
+      "id": "u2",
+      "status": "pending"
+    },
+    {
+      "content": "main.ts + preload.ts: add rules:get-target-statuses IPC",
+      "id": "u3",
+      "status": "pending"
+    },
+    {
+      "content": "src/stores/targetStatusStore.ts: new store for per-target live status",
+      "id": "u4",
+      "status": "pending"
+    },
+    {
+      "content": "StatusBadge.tsx: blocked→ACTIVE, unblocked→INACTIVE",
+      "id": "u5",
+      "status": "pending"
+    },
+    {
+      "content": "RuleCard.tsx: redesign - Activate/Deactivate, lock indicator, per-target dots",
+      "id": "u6",
+      "status": "pending"
+    },
+    {
+      "content": "__root.tsx: add per-target status polling on focus + 10s interval",
+      "id": "u7",
+      "status": "pending"
+    }
+  ],
+  "success": true
+}
+```
+Status: **completed**
+
+
+</details>
+</tool-use>
+
+<tool-use data-tool-type="unknown" data-tool-name="todo_write"><details>
+<summary>Tool use: **todo_write**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\types\index.ts</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\electron\blockers\BaseBlocker.ts</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\electron\blockers\FolderBlocker.ts</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\electron\blockers\FolderBlocker.ts</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\electron\blockers\AppBlocker.ts</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\electron\blockers\AppBlocker.ts</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\electron\blockers\WebsiteBlocker.ts</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\electron\blockers\WebsiteBlocker.ts</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\electron\blockers\BlockerEngine.ts</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="unknown" data-tool-name="todo_write">
+<details>
+<summary>Tool use: **todo_write**</summary>
+
+
+Parameters:
+
+```json
+{
+  "merge": true
+}
+```
+Result:
+
+```json
+{
+  "finalTodos": [
+    {
+      "content": "types/index.ts: add TargetStatus interface",
+      "id": "u1",
+      "status": "completed"
+    },
+    {
+      "content": "BaseBlocker + all 3 blockers + BlockerEngine: add getTargetStatuses()",
+      "id": "u2",
+      "status": "completed"
+    },
+    {
+      "content": "main.ts + preload.ts: add rules:get-target-statuses IPC",
+      "id": "u3",
+      "status": "in_progress"
+    },
+    {
+      "content": "src/stores/targetStatusStore.ts: new store for per-target live status",
+      "id": "u4",
+      "status": "pending"
+    },
+    {
+      "content": "StatusBadge.tsx: blocked→ACTIVE, unblocked→INACTIVE",
+      "id": "u5",
+      "status": "pending"
+    },
+    {
+      "content": "RuleCard.tsx: redesign - Activate/Deactivate, lock indicator, per-target dots",
+      "id": "u6",
+      "status": "pending"
+    },
+    {
+      "content": "__root.tsx: add per-target status polling on focus + 10s interval",
+      "id": "u7",
+      "status": "pending"
+    }
+  ],
+  "initialTodos": [
+    {
+      "content": "types/index.ts: add TargetStatus interface",
+      "id": "u1",
+      "status": "in_progress"
+    },
+    {
+      "content": "BaseBlocker + all 3 blockers + BlockerEngine: add getTargetStatuses()",
+      "id": "u2",
+      "status": "pending"
+    },
+    {
+      "content": "main.ts + preload.ts: add rules:get-target-statuses IPC",
+      "id": "u3",
+      "status": "pending"
+    },
+    {
+      "content": "src/stores/targetStatusStore.ts: new store for per-target live status",
+      "id": "u4",
+      "status": "pending"
+    },
+    {
+      "content": "StatusBadge.tsx: blocked→ACTIVE, unblocked→INACTIVE",
+      "id": "u5",
+      "status": "pending"
+    },
+    {
+      "content": "RuleCard.tsx: redesign - Activate/Deactivate, lock indicator, per-target dots",
+      "id": "u6",
+      "status": "pending"
+    },
+    {
+      "content": "__root.tsx: add per-target status polling on focus + 10s interval",
+      "id": "u7",
+      "status": "pending"
+    }
+  ],
+  "success": true,
+  "wasMerge": true
+}
+```
+Status: **completed**
+
+
+</details>
+</tool-use>
+
+<tool-use data-tool-type="unknown" data-tool-name="todo_write"><details>
+<summary>Tool use: **todo_write**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\electron\main.ts</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\electron\preload.ts</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\electron\preload.ts</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+Now the new Zustand store for per-target statuses:
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\src\stores\targetStatusStore.ts</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+Now rewrite `StatusBadge` — rename labels for the rule-level status:
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\src\components\StatusBadge.tsx</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+Now the full `RuleCard` redesign — clear separation of status / gateway lock / per-target dots / Activate-Deactivate button:
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\src\components\RuleCard.tsx</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+Finally, update `__root.tsx` to poll target statuses on focus and every 10s:
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2">
+
+<details><summary>Tool use: **edit_file_v2** • Edit file: c:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean\src\routes\__root.tsx</summary>
+
+</details>
+
+</tool-use>
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="shell" data-tool-name="run_terminal_command_v2">
+<details><summary>Tool use: **run_terminal_command_v2** • Run command: pnpm build 2>&1</summary>
+
+```bash
+pnpm build 2>&1
+```
+
+```
+
+&gt; deep-ocean@1.0.0 build C:\Users\EmirKISA\Desktop\workspace\personal_projects\deep_ocean
+&gt; node node_modules/electron-vite/bin/electron-vite.js build
+
+vite v6.4.2 building SSR bundle for production...
+transforming...
+✓ 10 modules transformed.
+rendering chunks...
+out/main/index.js  20.35 kB
+✓ built in 813ms
+vite v6.4.2 building SSR bundle for production...
+transforming...
+✓ 1 modules transformed.
+rendering chunks...
+out/preload/index.js  1.84 kB
+✓ built in 31ms
+vite v6.4.2 building for production...
+transforming...
+✓ 1772 modules transformed.
+rendering chunks...
+out/renderer/index.html                     0.41 kB
+out/renderer/assets/index-D18oqv6B.css     38.15 kB
+out/renderer/assets/index-BiD7P10c.js   1,115.03 kB
+✓ built in 5.49s
+
+```
+</details>
+</tool-use>
+
+<tool-use data-tool-type="shell" data-tool-name="run_terminal_command_v2"><details>
+<summary>Tool use: **run_terminal_command_v2**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<tool-use data-tool-type="unknown" data-tool-name="todo_write">
+<details>
+<summary>Tool use: **todo_write**</summary>
+
+
+Parameters:
+
+```json
+{
+  "merge": true
+}
+```
+Result:
+
+```json
+{
+  "finalTodos": [
+    {
+      "content": "types/index.ts: add TargetStatus interface",
+      "id": "u1",
+      "status": "completed"
+    },
+    {
+      "content": "BaseBlocker + all 3 blockers + BlockerEngine: add getTargetStatuses()",
+      "id": "u2",
+      "status": "completed"
+    },
+    {
+      "content": "main.ts + preload.ts: add rules:get-target-statuses IPC",
+      "id": "u3",
+      "status": "completed"
+    },
+    {
+      "content": "src/stores/targetStatusStore.ts: new store for per-target live status",
+      "id": "u4",
+      "status": "completed"
+    },
+    {
+      "content": "StatusBadge.tsx: blocked→ACTIVE, unblocked→INACTIVE",
+      "id": "u5",
+      "status": "completed"
+    },
+    {
+      "content": "RuleCard.tsx: redesign - Activate/Deactivate, lock indicator, per-target dots",
+      "id": "u6",
+      "status": "completed"
+    },
+    {
+      "content": "__root.tsx: add per-target status polling on focus + 10s interval",
+      "id": "u7",
+      "status": "completed"
+    }
+  ],
+  "initialTodos": [
+    {
+      "content": "types/index.ts: add TargetStatus interface",
+      "id": "u1",
+      "status": "completed"
+    },
+    {
+      "content": "BaseBlocker + all 3 blockers + BlockerEngine: add getTargetStatuses()",
+      "id": "u2",
+      "status": "completed"
+    },
+    {
+      "content": "main.ts + preload.ts: add rules:get-target-statuses IPC",
+      "id": "u3",
+      "status": "in_progress"
+    },
+    {
+      "content": "src/stores/targetStatusStore.ts: new store for per-target live status",
+      "id": "u4",
+      "status": "pending"
+    },
+    {
+      "content": "StatusBadge.tsx: blocked→ACTIVE, unblocked→INACTIVE",
+      "id": "u5",
+      "status": "pending"
+    },
+    {
+      "content": "RuleCard.tsx: redesign - Activate/Deactivate, lock indicator, per-target dots",
+      "id": "u6",
+      "status": "pending"
+    },
+    {
+      "content": "__root.tsx: add per-target status polling on focus + 10s interval",
+      "id": "u7",
+      "status": "pending"
+    }
+  ],
+  "success": true,
+  "wasMerge": true
+}
+```
+Status: **completed**
+
+
+</details>
+</tool-use>
+
+<tool-use data-tool-type="unknown" data-tool-name="todo_write"><details>
+<summary>Tool use: **todo_write**</summary>
+
+</details></tool-use>
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+Clean build. Here's exactly what changed and why:
+
+---
+
+### Concept separation
+
+The three things are now visually distinct and non-overlapping:
+
+| Element | What it means | Where |
+|---|---|---|
+| `● ACTIVE` / `○ INACTIVE` badge | OS block is currently applied or not | Always visible |
+| `🔒 gated` pill | This rule requires a phrase to deactivate | Shown only when gateway exists |
+| `⟳ LOCKING` / `⟳ UNLOCKING` badge (pulsing) | Transition in progress | Shown during `icacls` |
+
+The old "Block" / "Unlock" button is gone. It was the source of confusion — it implied you were doing something new, when really it was a toggle. Replaced with:
+- **"Activate"** (red border) — applies the OS block. Shown when rule is Inactive.
+- **"Deactivate"** (muted, subdued) — removes the OS block. Shown when Active. If a gateway exists, it carries a `🔒` prefix and opens the phrase dialog instead of acting immediately.
+
+The deactivate button is intentionally less prominent than activate — you want blocking to be easy and unblocking to require intention.
+
+### Per-target live status dots
+
+Each folder, app, or domain now shows its own live OS state as a small colored dot under the rule name:
+- 🔴 red dot = that specific folder/exe/domain is locked at OS level
+- 🟢 green dot = accessible
+- 🟠 orange dot = check failed
+
+These are backed by `getTargetStatuses()` on each blocker, which does the actual `icacls` / hosts-file check per target independently. For 2+ targets it renders in a 2-column grid.
+
+### Polling strategy
+
+`__root.tsx` runs two sync paths:
+1. **On mount** + **on window focus**: `syncRules()` (reconciles rule-level status) + `syncTargetStatuses()` (refreshes per-target dots) together
+2. **Every 10 seconds while focused** (`setInterval`): `syncTargetStatuses()` only — lightweight per-target refresh that catches schedule-triggered changes without hammering the full rule sync
+3. **After any IPC status event** (scheduled lock fires, re-block after temp-unblock): `syncTargetStatuses()` fires again to update the dots immediately
+
+---
+
+_**User**_
+
+when I activate something and alt tab twice to see the app again, it resets to inactive??
+
+Look, when I openthe app, it says inactive but locks are there in place and the folders are blocked!! It should not be possible!!
+
+I think there is an architectural problem or approach problem here!!!!!
+
+There are block rules. which is the global rules!
+There are folders inside them which points to folders!
+
+Those should be blocked whenever the rule is active and we are within the scheduled block range within the rule!! No manual blocking or unblocking is done! Only manual activation and inactivation should be possible, which is protected by gate! activation of rules should be persistent! 
+
+And blocking is done only by rules, not any manual button!!!!!  
+
+---
+
+_**Agent (claude-4.6-sonnet-medium-thinking)**_
+
+<think><details><summary>Thought Process</summary>
+The user has identified a fundamental architectural problem. Let me understand what they're saying:
+
+**The Core Problem:**
+
+1. When the user activates a rule, then alt-tabs and comes back, it shows "inactive" even though the folders ARE actually locked at the OS level (icacls deny is in place)
+
+2. This happens because of the `syncRules()` call on window focus - it calls `BlockerEngine.getStatus()` for each rule, which checks if the folder is actually denied by icacls. BUT... the status comparison logic might be resetting the status incorrectly.
+
+Wait, let me think about this more carefully...
+
+**The Real Architectural Problem:**
+
+
+The user's mental model is completely different from what I built. They want rules to have an "enabled" state that determines whether the rule is armed, and when enabled, the rule follows its schedule to apply OS-level blocks during scheduled windows. There's no manual block/unblock toggle—only enable/disable of the rule itself, with the schedule controlling when blocks actually get applied.
+
+Looking at the sync issue: when the user activates a rule outside a scheduled window, the folder should remain unlocked (since we're outside the schedule), but the rule should be marked as enabled. The problem is that when they alt-tab back, the activation is being undone—the rule reverts to inactive. I need to trace through the activation flow to see where this is happening, because something in the `blockNow()` call or the subsequent sync is causing the rule state to reset.
+
+Still examining the sync logic...
+
+So when the window regains focus, `syncAllStatuses()` runs through each rule and calls `BlockerEngine.getStatus()` to check the actual folder permissions via `icacls`. If the status doesn't match what's stored, it updates the rule and sends the new status to the frontend. But the user is saying the folders ARE blocked according to `icacls`, yet the app is showing them as unblocked—which means `getStatus()` must be returning `unblocked` even though the DENY ACE exists.
+
+I'm wondering if the issue is actually in the startup reconciliation logic in `scheduler.ts`. When the app initializes, it checks whether each rule should be blocked based on its schedule, and if the stored status doesn't match what it should be, it either blocks or unblocks the folder. So maybe the reconciliation is running and undoing the blocks because the schedule says they shouldn't be blocked right now. Now I'm wondering if `syncAllStatuses` is getting incorrect results from the icacls checks. The function that determines if a folder is denied looks for lines containing both the username and "deny" in the icacls output, which should work in theory. But icacls could fail silently if the path doesn't exist or there's a permission issue, and that might be causing the status to reset incorrectly.
+
+Actually, rereading the user's requirements more carefully, I think the real issue is architectural. The user wants rules to be the only mechanism for blocking—not manual buttons. A rule should have an enabled/disabled state that persists, and when enabled, it automatically blocks folders during the scheduled time windows. The blocking should be driven entirely by whether the rule is active and whether the current time falls within the rule's schedule, not by checking actual folder permissions. The sync issue might be simpler than I thought—when the user activates a rule and switches windows, the status check is returning `unblocked` even though the folder is actually locked, or the scheduler's initialization is running again (possibly during hot module reload in dev) and triggering a reconciliation that unblocks the folder. I need to trace through the scheduler's logic to see when it's checking whether a rule should be blocked and potentially undoing the user's activation.
+
+Actually, the core problem is architectural: there shouldn't be a "manual block" state at all. The rule should just be either enabled or disabled, and the actual OS state should be computed based on whether we're currently in a scheduled window. Let me redesign this with a clearer separation between the rule's enabled flag and its computed status.
+
+Defining the new data model... I see—the user is clarifying that only the enable/disable toggle should be user-controlled, and blocking happens entirely through the schedule. The UI should show the toggle for activating or deactivating the rule itself, separate from a status indicator that reflects the actual OS state (locked/unlocked). There's no manual block button; the blocking is purely automatic based on whether the rule is enabled and the current time falls within the schedule window. - The per-target dots show actual OS state
+- Button: "Enable" / "Disable" (not "Block"/"Unblock")
+- Disable is gated if gateways exist
+
+**The sync problem:**
+
+The `syncAllStatuses` updates the `status` field (OS state) - this is fine, it should update the lock indicators. But `status` should NOT be confused with `enabled`. When `enabled=true` and outside schedule, the OS state (`status`) would be `unblocked` - but the rule is still ENABLED. When it's within schedule hours, `status` would be `blocked`.
+
+**The specific bug:**
+
+The current code conflates `status: 'blocked'|'unblocked'` with "is rule active" from the user's perspective. When the user clicks "Activate", it sets `status = 'blocked'`, but then `</details></think>
