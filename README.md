@@ -1,30 +1,30 @@
-# DeepOcean
+A blocker app, simply because no app provides real source-agnostic control over your system for free. 
 
-A Windows desktop app that blocks distracting folders, apps, and websites on a schedule.
+Work in the deep ocean.
 
-## Download
+**_Download_**
 
 Grab the latest installer from [Releases](https://github.com/emirks/deep-ocean/releases).
 
-## Features
+**_Features_**
 
 - **Folder blocking** — deny filesystem access to any folder via `icacls`
 - **Scheduled rules** — set daily time windows (e.g. block 09:00–17:00)
 - **App & website blockers** — stubs ready for extension
 - **System tray** — runs quietly in the background with notifications
 
-## Stack
+**_Stack_**
 
 Electron 33 · React 19 · TypeScript · Tailwind CSS · shadcn/ui · Zustand · TanStack Router · electron-store · node-cron
 
-## Dev
+**_Dev_**
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-## Build
+**_Build_**
 
 ```bash
 pnpm build          # compile
