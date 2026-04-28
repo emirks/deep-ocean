@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
 import { X, Plus } from 'lucide-react'
 import type { WebsiteConfig } from '../../../types'
 
@@ -11,11 +10,18 @@ interface Props {
   onChange: (config: WebsiteConfig) => void
 }
 
+function normaliseDomain(raw: string): string {
+  return raw.trim().toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/\/.*/, '')
+}
+
 export function WebsiteFields({ config, onChange }: Props) {
   const [input, setInput] = useState('')
 
   const add = () => {
-    const domain = input.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*/, '')
+    const domain = normaliseDomain(input)
     if (domain && !config.domains.includes(domain)) {
       onChange({ domains: [...config.domains, domain] })
       setInput('')
@@ -28,26 +34,27 @@ export function WebsiteFields({ config, onChange }: Props) {
 
   return (
     <div className="space-y-3">
-      <Badge variant="outline" className="text-yellow-400 border-yellow-400/30 bg-yellow-400/10">
-        Coming in v2
-      </Badge>
-      <div className="space-y-2 opacity-60 pointer-events-none">
-        <Label>Domains to block</Label>
-        <div className="flex gap-2">
-          <Input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && add()}
-            placeholder="youtube.com"
-            className="flex-1"
-          />
-          <Button type="button" variant="outline" size="icon" onClick={add}>
-            <Plus className="h-4 w-4" />
-          </Button>
-        </div>
+      <Label>Domains to block</Label>
+      <div className="flex gap-2">
+        <Input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && add()}
+          placeholder="youtube.com"
+          className="flex-1"
+        />
+        <Button type="button" variant="outline" size="icon" onClick={add}>
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {config.domains.length > 0 && (
         <div className="flex flex-wrap gap-1.5 pt-1">
           {config.domains.map(d => (
-            <span key={d} className="inline-flex items-center gap-1 rounded-full bg-secondary text-secondary-foreground text-xs px-2.5 py-1">
+            <span
+              key={d}
+              className="inline-flex items-center gap-1 rounded-full bg-secondary text-secondary-foreground text-xs px-2.5 py-1"
+            >
               {d}
               <button type="button" onClick={() => remove(d)}>
                 <X className="h-3 w-3" />
@@ -55,8 +62,13 @@ export function WebsiteFields({ config, onChange }: Props) {
             </span>
           ))}
         </div>
-      </div>
-      <p className="text-xs text-muted-foreground">Website blocking via hosts file will be available in v2.</p>
+      )}
+
+      <p className="text-xs text-muted-foreground">
+        Both <code className="text-primary">domain.com</code> and{' '}
+        <code className="text-primary">www.domain.com</code> are blocked automatically
+        via the hosts file. Requires admin privileges.
+      </p>
     </div>
   )
 }

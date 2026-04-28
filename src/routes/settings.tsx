@@ -2,7 +2,6 @@ import { createRoute } from '@tanstack/react-router'
 import { rootRoute } from './__root'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { Switch } from '@/components/ui/switch'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
@@ -44,9 +43,10 @@ function Settings() {
 
       <div className="flex-1 overflow-auto px-6 py-2">
         <div className="max-w-lg divide-y divide-border">
+
           <SettingRow
             label="Launch at startup"
-            description="Start DeepOcean when you log in"
+            description="Start DeepOcean when you log in (recommended — required for scheduled blocks)"
           >
             <Switch
               checked={settings.launchAtStartup}
@@ -54,9 +54,11 @@ function Settings() {
             />
           </SettingRow>
 
+          <Separator />
+
           <SettingRow
             label="Notifications"
-            description="Show a notification when a rule blocks or unblocks"
+            description="Show a notification when a rule locks or unlocks"
           >
             <Switch
               checked={settings.notifications}
@@ -64,29 +66,26 @@ function Settings() {
             />
           </SettingRow>
 
-          <Separator />
-
           <SettingRow
-            label="Confirmation phrase"
-            description="Require typing a phrase before manually unblocking"
+            label="Pre-lock warning"
+            description="Send a notification N minutes before a scheduled lock fires"
           >
-            <Switch
-              checked={settings.confirmationPhraseEnabled}
-              onCheckedChange={v => save({ confirmationPhraseEnabled: v })}
-            />
+            <Select
+              value={String(settings.preNotificationMinutes)}
+              onValueChange={v => save({ preNotificationMinutes: Number(v) })}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">Off</SelectItem>
+                <SelectItem value="5">5 minutes</SelectItem>
+                <SelectItem value="10">10 minutes</SelectItem>
+                <SelectItem value="15">15 minutes</SelectItem>
+                <SelectItem value="30">30 minutes</SelectItem>
+              </SelectContent>
+            </Select>
           </SettingRow>
-
-          {settings.confirmationPhraseEnabled && (
-            <div className="py-3">
-              <Label className="text-xs mb-2 block">Phrase to type</Label>
-              <Input
-                value={settings.confirmationPhrase}
-                onChange={e => save({ confirmationPhrase: e.target.value })}
-                placeholder="I will be productive"
-                className="max-w-sm"
-              />
-            </div>
-          )}
 
           <Separator />
 
@@ -108,6 +107,7 @@ function Settings() {
               </SelectContent>
             </Select>
           </SettingRow>
+
         </div>
       </div>
     </div>

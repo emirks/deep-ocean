@@ -7,8 +7,10 @@ interface Props {
 }
 
 const config: Record<RuleStatus, { label: string; classes: string }> = {
-  blocked:   { label: '● BLOCKED',   classes: 'border-red-500/30 bg-red-500/10 text-red-400' },
-  unblocked: { label: '○ ACTIVE',    classes: 'border-green-500/30 bg-green-500/10 text-green-400' },
+  blocked:   { label: '● BLOCKED',    classes: 'border-red-500/30 bg-red-500/10 text-red-400' },
+  unblocked: { label: '○ ACTIVE',     classes: 'border-green-500/30 bg-green-500/10 text-green-400' },
+  locking:   { label: '⟳ LOCKING',   classes: 'border-orange-500/30 bg-orange-500/10 text-orange-300 animate-pulse' },
+  unlocking: { label: '⟳ UNLOCKING', classes: 'border-blue-500/30 bg-blue-500/10 text-blue-300 animate-pulse' },
   paused:    { label: '⏸ PAUSED',    classes: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400' },
   error:     { label: '⚠ ERROR',     classes: 'border-orange-500/30 bg-orange-500/10 text-orange-400' }
 }

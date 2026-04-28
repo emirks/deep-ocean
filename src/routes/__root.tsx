@@ -1,40 +1,71 @@
-import { createRootRoute, Outlet, Link, useNavigate } from '@tanstack/react-router'
+import { createRootRoute, Outlet, Link } from '@tanstack/react-router'
 import { Waves, LayoutDashboard, PlusCircle, Settings, Shield } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useRulesStore } from '@/stores/rulesStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 function RootLayout() {
-  const setRules = useRulesStore(s => s.setRules)
+  const setRules    = useRulesStore(s => s.setRules)
   const setSettings = useSettingsStore(s => s.setSettings)
-  const navigate = useNavigate()
+  const syncing     = useRef(false)
+
+  const syncRules = async () => {
+    if (syncing.current) return
+    syncing.current = true
+    try {
+      const rules = await window.api.syncRules()
+      setRules(rules)
+    } catch {
+      // Fallback: just fetch stored values without OS reconciliation
+      const rules = await window.api.getRules()
+      setRules(rules)
+    } finally {
+      syncing.current = false
+    }
+  }
 
   useEffect(() => {
-    window.api.getRules().then(setRules)
+    // Initial load: sync rules with real OS state + load settings
+    syncRules()
     window.api.getSettings().then(setSettings)
 
-    window.api.onStatusUpdate((data: unknown) => {
+    // Status events pushed from main process (scheduled blocks, re-blocks, etc.)
+    const cleanupStatus = window.api.onStatusUpdate((data: unknown) => {
       const d = data as { id?: string; status?: string; pauseAll?: boolean }
       if (d.id && d.status) {
         useRulesStore.getState().updateStatus(d.id, d.status as never)
       }
     })
 
-    window.api.onThemeChanged((theme: string) => {
+    const cleanupTheme = window.api.onThemeChanged((theme: string) => {
       applyTheme(theme)
     })
+
+    // Re-sync when the window regains focus (user may have switched away
+    // and blocks may have changed due to scheduled events)
+    const onFocus = () => syncRules()
+    window.addEventListener('focus', onFocus)
+
+    return () => {
+      cleanupStatus()
+      cleanupTheme()
+      window.removeEventListener('focus', onFocus)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Apply theme whenever settings change
+  const theme = useSettingsStore(s => s.theme)
+  const loaded = useSettingsStore(s => s.loaded)
   useEffect(() => {
-    const settings = useSettingsStore.getState()
-    if (settings.loaded) applyTheme(settings.theme)
-  })
+    if (loaded) applyTheme(theme)
+  }, [theme, loaded])
 
   const navItems = [
-    { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/add-rule', icon: PlusCircle, label: 'Add Rule' },
-    { to: '/settings', icon: Settings, label: 'Settings' }
+    { to: '/',          icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/add-rule',  icon: PlusCircle,      label: 'Add Rule'  },
+    { to: '/settings',  icon: Settings,        label: 'Settings'  }
   ]
 
   return (
@@ -68,7 +99,7 @@ function RootLayout() {
         <div className="px-3 py-4 border-t border-border">
           <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
             <Shield className="h-3 w-3" />
-            <span>DeepOcean v1.0</span>
+            <span>DeepOcean v1.1</span>
           </div>
         </div>
       </aside>

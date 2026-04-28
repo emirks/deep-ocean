@@ -7,18 +7,22 @@ import { Label } from '@/components/ui/label'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { SchedulePicker } from '@/components/SchedulePicker'
 import { FolderFields } from '@/components/blockers/FolderFields'
 import { AppFields } from '@/components/blockers/AppFields'
 import { WebsiteFields } from '@/components/blockers/WebsiteFields'
 import { Separator } from '@/components/ui/separator'
 import { useRulesStore } from '@/stores/rulesStore'
-import { ArrowLeft, Save } from 'lucide-react'
-import type { BlockerType, BlockerConfig, FolderConfig, AppConfig, WebsiteConfig, Schedule } from '../../types'
+import { ArrowLeft, Save, ShieldCheck } from 'lucide-react'
+import type {
+  BlockerType, BlockerConfig, FolderConfig, AppConfig, WebsiteConfig,
+  Schedule, Gateway, PhraseGateway
+} from '../../types'
 
 const defaultConfig: Record<BlockerType, BlockerConfig> = {
-  folder:  { path: '' } as FolderConfig,
-  app:     { exeName: '', exePath: '' } as AppConfig,
+  folder:  { paths: [] } as FolderConfig,
+  app:     { apps: [] } as AppConfig,
   website: { domains: [] } as WebsiteConfig
 }
 
@@ -35,12 +39,17 @@ function AddRule() {
   const existingRule = useRulesStore(s => s.rules.find(r => r.id === editId))
   const { addRule } = useRulesStore()
 
-  const [label, setLabel] = useState('')
-  const [type, setType] = useState<BlockerType>('folder')
-  const [config, setConfig] = useState<BlockerConfig>(defaultConfig.folder)
+  const [label, setLabel]         = useState('')
+  const [type, setType]           = useState<BlockerType>('folder')
+  const [config, setConfig]       = useState<BlockerConfig>(defaultConfig.folder)
   const [schedules, setSchedules] = useState<Schedule[]>([defaultSchedule()])
-  const [saving, setSaving] = useState(false)
+  const [gateways, setGateways]   = useState<Gateway[]>([])
+  const [saving, setSaving]       = useState(false)
   const [blockerTypes, setBlockerTypes] = useState<{ type: string; label: string }[]>([])
+
+  // Gateway UI state
+  const phraseGateway = gateways.find((g): g is PhraseGateway => g.type === 'phrase')
+  const phraseEnabled = !!phraseGateway
 
   useEffect(() => {
     window.api.getBlockerTypes().then(setBlockerTypes)
@@ -52,6 +61,7 @@ function AddRule() {
       setType(existingRule.type)
       setConfig(existingRule.config)
       setSchedules(existingRule.schedules)
+      setGateways(existingRule.gateways ?? [])
     }
   }, [existingRule])
 
@@ -61,17 +71,29 @@ function AddRule() {
     setConfig({ ...defaultConfig[bt] })
   }
 
+  const togglePhraseGateway = (enabled: boolean) => {
+    if (enabled) {
+      setGateways(prev => [...prev.filter(g => g.type !== 'phrase'), { type: 'phrase', phrase: '' }])
+    } else {
+      setGateways(prev => prev.filter(g => g.type !== 'phrase'))
+    }
+  }
+
+  const updatePhrase = (phrase: string) => {
+    setGateways(prev => prev.map(g => g.type === 'phrase' ? { ...g, phrase } : g))
+  }
+
   const handleSave = async () => {
     if (!label.trim()) return
     setSaving(true)
     try {
       if (editId && existingRule) {
-        const updated = await window.api.updateRule({ id: editId, label, type, config, schedules })
+        const updated = await window.api.updateRule({ id: editId, label, type, config, schedules, gateways })
         useRulesStore.getState().setRules(
           useRulesStore.getState().rules.map(r => r.id === editId ? updated : r)
         )
       } else {
-        const rule = await window.api.addRule({ label, type, config, schedules })
+        const rule = await window.api.addRule({ label, type, config, schedules, gateways })
         addRule(rule)
       }
       navigate({ to: '/' })
@@ -88,51 +110,98 @@ function AddRule() {
         </Button>
         <div>
           <h1 className="text-lg font-semibold">{editId ? 'Edit Rule' : 'Add Rule'}</h1>
-          <p className="text-xs text-muted-foreground">Configure what to block and when</p>
+          <p className="text-xs text-muted-foreground">Configure what to block, when, and how hard</p>
         </div>
       </header>
 
       <div className="flex-1 overflow-auto px-6 py-5">
         <div className="max-w-lg space-y-6">
-          {/* Name */}
+
+          {/* ── Name ── */}
           <div className="space-y-2">
             <Label>Rule name</Label>
             <Input
               value={label}
               onChange={e => setLabel(e.target.value)}
-              placeholder="e.g. Minecraft Projects, Social Media..."
+              placeholder="e.g. Minecraft, Social Media…"
             />
           </div>
 
           <Separator />
 
-          {/* Type */}
-          <div className="space-y-2">
-            <Label>Blocker type</Label>
-            <Select value={type} onValueChange={handleTypeChange}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select type..." />
-              </SelectTrigger>
-              <SelectContent>
-                {blockerTypes.map(bt => (
-                  <SelectItem key={bt.type} value={bt.type}>{bt.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {/* ── Block type + fields ── */}
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Block type</Label>
+              <Select value={type} onValueChange={handleTypeChange}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select type…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {blockerTypes.map(bt => (
+                    <SelectItem key={bt.type} value={bt.type}>{bt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-          {/* Type-specific fields */}
-          {type === 'folder'  && <FolderFields  config={config as FolderConfig}  onChange={c => setConfig(c)} />}
-          {type === 'app'     && <AppFields     config={config as AppConfig}     onChange={c => setConfig(c)} />}
-          {type === 'website' && <WebsiteFields config={config as WebsiteConfig} onChange={c => setConfig(c)} />}
+            {type === 'folder'  && <FolderFields  config={config as FolderConfig}  onChange={c => setConfig(c)} />}
+            {type === 'app'     && <AppFields     config={config as AppConfig}     onChange={c => setConfig(c)} />}
+            {type === 'website' && <WebsiteFields config={config as WebsiteConfig} onChange={c => setConfig(c)} />}
+          </div>
 
           <Separator />
 
-          {/* Schedule */}
+          {/* ── Schedule ── */}
           <div className="space-y-3">
             <Label>Schedule</Label>
             <SchedulePicker schedules={schedules} onChange={setSchedules} />
           </div>
+
+          <Separator />
+
+          {/* ── Gateways ── */}
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-sm font-semibold flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-purple-400" />
+                Gateways
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Require extra confirmation before this rule can be manually unlocked.
+                Scheduled unlocks bypass gateways.
+              </p>
+            </div>
+
+            {/* Phrase gateway */}
+            <div className="rounded-lg border border-border p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Phrase confirmation</p>
+                  <p className="text-xs text-muted-foreground">
+                    Must type an exact phrase before unlocking
+                  </p>
+                </div>
+                <Switch
+                  checked={phraseEnabled}
+                  onCheckedChange={togglePhraseGateway}
+                />
+              </div>
+
+              {phraseEnabled && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Phrase to type</Label>
+                  <Input
+                    value={phraseGateway?.phrase ?? ''}
+                    onChange={e => updatePhrase(e.target.value)}
+                    placeholder="I will be productive"
+                    className="text-sm"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
         </div>
       </div>
 
@@ -140,7 +209,7 @@ function AddRule() {
         <Button variant="outline" onClick={() => navigate({ to: '/' })}>Cancel</Button>
         <Button onClick={handleSave} disabled={saving || !label.trim()}>
           <Save className="h-4 w-4 mr-1.5" />
-          {saving ? 'Saving...' : editId ? 'Update Rule' : 'Save Rule'}
+          {saving ? 'Saving…' : editId ? 'Update Rule' : 'Save Rule'}
         </Button>
       </footer>
     </div>

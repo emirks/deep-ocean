@@ -10,8 +10,7 @@ interface SettingsState extends AppSettings {
 export const useSettingsStore = create<SettingsState>((set) => ({
   launchAtStartup: true,
   notifications: true,
-  confirmationPhrase: 'I will be productive',
-  confirmationPhraseEnabled: false,
+  preNotificationMinutes: 5,
   theme: 'system',
   loaded: false,
   setSettings: (settings) => set({ ...settings, loaded: true }),
