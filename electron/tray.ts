@@ -26,9 +26,12 @@ export function createTray(mainWindow: BrowserWindow): void {
     },
     { type: 'separator' },
     {
-      label: 'Quit',
+      label: 'Quit DeepOcean',
       click: () => {
-        app.quit()
+        // Remove the close intercept so the window can actually close,
+        // then exit. Active blocks are NOT cleared — NTFS ACLs persist.
+        mainWindow.removeAllListeners('close')
+        app.exit(0)
       }
     }
   ])

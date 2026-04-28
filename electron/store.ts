@@ -12,8 +12,7 @@ export const store = new Store<StoreSchema>({
     settings: {
       launchAtStartup: true,
       notifications: true,
-      confirmationPhrase: 'I will be productive',
-      confirmationPhraseEnabled: false,
+      preNotificationMinutes: 5,
       theme: 'system'
     }
   }
