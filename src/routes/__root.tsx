@@ -1,5 +1,6 @@
 import { createRootRoute, Outlet, Link } from '@tanstack/react-router'
-import { Waves, LayoutDashboard, PlusCircle, Settings, Shield } from 'lucide-react'
+import { LayoutDashboard, PlusCircle, Settings, Shield } from 'lucide-react'
+import logo from '@/assets/logo.png'
 import { cn } from '@/lib/utils'
 import { useEffect, useRef } from 'react'
 import { useRulesStore } from '@/stores/rulesStore'
@@ -126,9 +127,7 @@ function RootLayout() {
     <div className="flex h-screen bg-background text-foreground overflow-hidden">
       <aside className="w-56 flex-shrink-0 border-r border-border bg-sidebar flex flex-col">
         <div className="flex items-center gap-2 px-5 py-5 border-b border-border">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600">
-            <Waves className="h-4 w-4 text-white" />
-          </div>
+          <img src={logo} alt="DeepOcean" className="h-8 w-8 rounded-lg object-cover flex-shrink-0" />
           <span className="font-semibold text-sidebar-foreground tracking-tight">DeepOcean</span>
         </div>
 
