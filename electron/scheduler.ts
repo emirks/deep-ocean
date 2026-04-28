@@ -4,13 +4,16 @@ import type { Rule, Schedule } from '../types'
 import { BlockerEngine } from './blockers/BlockerEngine'
 import { store } from './store'
 import { notify } from './notifications'
+import { createLogger } from './logger'
+
+const log = createLogger('Scheduler')
 
 let activeTasks: ScheduledTask[] = []
 
 function sendStatusUpdate(id: string, status: Rule['status']): void {
-  BrowserWindow.getAllWindows().forEach(win => {
-    if (!win.isDestroyed()) win.webContents.send('rules:status-update', { id, status })
-  })
+  const wins = BrowserWindow.getAllWindows().filter(w => !w.isDestroyed())
+  log.debug(`sendStatusUpdate — id=${id} status=${status} — ${wins.length} window(s) reachable`)
+  wins.forEach(win => win.webContents.send('rules:status-update', { id, status }))
 }
 
 function updateRuleStatus(id: string, status: Rule['status']): void {
@@ -50,43 +53,55 @@ export function isWithinSchedule(schedules: Schedule[]): boolean {
 export function initScheduler(): void {
   const rules = store.get('rules') as Rule[]
   const { preNotificationMinutes } = store.get('settings')
+  const enabled = rules.filter(r => r.enabled)
+  const disabled = rules.filter(r => !r.enabled)
+
+  log.info(`initScheduler — ${rules.length} rule(s) total (${enabled.length} enabled, ${disabled.length} disabled)`)
 
   for (const rule of rules) {
     if (!rule.enabled) {
-      // Disabled rules must have no OS locks — clear any lingering ones from a previous session
-      BlockerEngine.unblock(rule).catch(() => { /* path may not exist */ })
+      log.info(`  "${rule.label}" disabled — clearing any lingering OS locks`)
+      BlockerEngine.unblock(rule).catch(e => log.warn(`  Unblock of disabled rule "${rule.label}" failed (may be clean):`, e))
       continue
     }
 
-    // ── Schedule cron jobs for this enabled rule ──────────────────────────────
+    // ── Register cron jobs ────────────────────────────────────────────────────
 
     for (const schedule of rule.schedules) {
-      const blockTask = cron.schedule(toCron(schedule.lockTime, schedule.days), async () => {
+      const lockCron   = toCron(schedule.lockTime,   schedule.days)
+      const unlockCron = toCron(schedule.unlockTime, schedule.days)
+      log.debug(`  "${rule.label}" — registering cron lock=${lockCron}  unlock=${unlockCron}`)
+
+      const blockTask = cron.schedule(lockCron, async () => {
+        log.info(`Cron LOCK fired — "${rule.label}" (${schedule.lockTime})`)
         try {
           updateRuleStatus(rule.id, 'locking')
           sendStatusUpdate(rule.id, 'locking')
           await BlockerEngine.block(rule)
           updateRuleStatus(rule.id, 'blocked')
           sendStatusUpdate(rule.id, 'blocked')
+          log.info(`Cron LOCK complete — "${rule.label}"`)
           notify('DeepOcean — Locked', rule.label)
         } catch (e) {
-          console.error('[scheduler] block error', e)
+          log.error(`Cron LOCK failed — "${rule.label}":`, e)
           updateRuleStatus(rule.id, 'error')
           sendStatusUpdate(rule.id, 'error')
         }
       })
       activeTasks.push(blockTask)
 
-      const unblockTask = cron.schedule(toCron(schedule.unlockTime, schedule.days), async () => {
+      const unblockTask = cron.schedule(unlockCron, async () => {
+        log.info(`Cron UNLOCK fired — "${rule.label}" (${schedule.unlockTime})`)
         try {
           updateRuleStatus(rule.id, 'unlocking')
           sendStatusUpdate(rule.id, 'unlocking')
           await BlockerEngine.unblock(rule)
           updateRuleStatus(rule.id, 'unblocked')
           sendStatusUpdate(rule.id, 'unblocked')
+          log.info(`Cron UNLOCK complete — "${rule.label}"`)
           notify('DeepOcean — Unlocked', rule.label)
         } catch (e) {
-          console.error('[scheduler] unblock error', e)
+          log.error(`Cron UNLOCK failed — "${rule.label}":`, e)
           updateRuleStatus(rule.id, 'error')
           sendStatusUpdate(rule.id, 'error')
         }
@@ -96,7 +111,10 @@ export function initScheduler(): void {
       if (preNotificationMinutes > 0) {
         const preTime = minutesBefore(schedule.lockTime, preNotificationMinutes)
         if (preTime) {
-          const preTask = cron.schedule(toCron(preTime, schedule.days), () => {
+          const preCron = toCron(preTime, schedule.days)
+          log.debug(`  "${rule.label}" — registering pre-notify cron=${preCron} (${preNotificationMinutes} min before lock)`)
+          const preTask = cron.schedule(preCron, () => {
+            log.info(`Pre-lock notification — "${rule.label}" locking in ${preNotificationMinutes} min`)
             notify(`DeepOcean — Locking in ${preNotificationMinutes} min`, rule.label)
           })
           activeTasks.push(preTask)
@@ -104,22 +122,43 @@ export function initScheduler(): void {
       }
     }
 
-    // ── Startup reconciliation for enabled rules ──────────────────────────────
-    // Apply the correct OS state based on whether we're inside a schedule window.
+    // ── Startup reconciliation ────────────────────────────────────────────────
+
     const shouldBeBlocked = isWithinSchedule(rule.schedules)
+    log.info(`  "${rule.label}" startup reconcile — shouldBeBlocked=${shouldBeBlocked}`)
+
     if (shouldBeBlocked) {
       BlockerEngine.block(rule)
-        .then(() => updateRuleStatus(rule.id, 'blocked'))
-        .catch(e => console.error('[scheduler] startup block error', e))
+        .then(() => {
+          log.info(`  "${rule.label}" startup block applied`)
+          updateRuleStatus(rule.id, 'blocked')
+          sendStatusUpdate(rule.id, 'blocked')
+        })
+        .catch(e => {
+          log.error(`  "${rule.label}" startup block failed:`, e)
+          updateRuleStatus(rule.id, 'error')
+          sendStatusUpdate(rule.id, 'error')
+        })
     } else {
       BlockerEngine.unblock(rule)
-        .then(() => updateRuleStatus(rule.id, 'unblocked'))
-        .catch(e => console.error('[scheduler] startup unblock error', e))
+        .then(() => {
+          log.info(`  "${rule.label}" startup unblock applied`)
+          updateRuleStatus(rule.id, 'unblocked')
+          sendStatusUpdate(rule.id, 'unblocked')
+        })
+        .catch(e => {
+          log.error(`  "${rule.label}" startup unblock failed:`, e)
+          updateRuleStatus(rule.id, 'error')
+          sendStatusUpdate(rule.id, 'error')
+        })
     }
   }
+
+  log.info(`initScheduler — ${activeTasks.length} cron task(s) registered`)
 }
 
 export function reloadScheduler(): void {
+  log.info(`reloadScheduler — stopping ${activeTasks.length} existing task(s)`)
   activeTasks.forEach(t => t.stop())
   activeTasks = []
   initScheduler()
