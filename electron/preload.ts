@@ -3,26 +3,27 @@ import type { Rule, AppSettings, TargetStatus } from '../types'
 
 const api = {
   // Rules
-  getRules:             ():  Promise<Rule[]>                                        => ipcRenderer.invoke('rules:get-all'),
-  syncRules:            ():  Promise<Rule[]>                                        => ipcRenderer.invoke('rules:sync'),
-  getTargetStatuses:    ():  Promise<Record<string, TargetStatus[]>>               => ipcRenderer.invoke('rules:get-target-statuses'),
-  addRule:         (rule: Omit<Rule,'id'|'status'|'createdAt'>): Promise<Rule>     => ipcRenderer.invoke('rules:add', rule),
-  updateRule:      (data: { id: string } & Partial<Rule>):       Promise<Rule>     => ipcRenderer.invoke('rules:update', data),
-  removeRule:      (id: string):                                 Promise<void>     => ipcRenderer.invoke('rules:remove', { id }),
-  blockNow:        (id: string):                                 Promise<void>     => ipcRenderer.invoke('rules:block-now', { id }),
-  unblockNow:      (id: string, duration?: number):             Promise<void>     => ipcRenderer.invoke('rules:unblock-now', { id, duration }),
-  pauseAll:        (duration: number):                           Promise<void>     => ipcRenderer.invoke('app:pause-all', { duration }),
+  getRules:          ():                                           Promise<Rule[]>                    => ipcRenderer.invoke('rules:get-all'),
+  syncRules:         ():                                           Promise<Rule[]>                    => ipcRenderer.invoke('rules:sync'),
+  getTargetStatuses: ():                                           Promise<Record<string, TargetStatus[]>> => ipcRenderer.invoke('rules:get-target-statuses'),
+  addRule:           (rule: Omit<Rule,'id'|'status'|'createdAt'>): Promise<Rule>                    => ipcRenderer.invoke('rules:add', rule),
+  updateRule:        (data: { id: string } & Partial<Rule>):       Promise<Rule>                    => ipcRenderer.invoke('rules:update', data),
+  removeRule:        (id: string):                                  Promise<void>                    => ipcRenderer.invoke('rules:remove', { id }),
+  /** Arms the rule. Locks immediately if within a schedule window. */
+  enableRule:        (id: string):                                  Promise<void>                    => ipcRenderer.invoke('rules:enable', { id }),
+  /** Disarms the rule and removes the OS lock. Gateway check done in renderer. */
+  disableRule:       (id: string):                                  Promise<void>                    => ipcRenderer.invoke('rules:disable', { id }),
 
   // Blockers
-  getBlockerTypes: (): Promise<{ type: string; label: string }[]>                => ipcRenderer.invoke('blockers:types'),
+  getBlockerTypes:   (): Promise<{ type: string; label: string }[]>                                => ipcRenderer.invoke('blockers:types'),
 
   // Dialogs
-  pickFolder:      ():  Promise<string | null>                                    => ipcRenderer.invoke('dialog:folder'),
-  pickExe:         ():  Promise<string | null>                                    => ipcRenderer.invoke('dialog:exe'),
+  pickFolder:        ():  Promise<string | null>                                                    => ipcRenderer.invoke('dialog:folder'),
+  pickExe:           ():  Promise<string | null>                                                    => ipcRenderer.invoke('dialog:exe'),
 
   // Settings
-  getSettings:     ():                            Promise<AppSettings>            => ipcRenderer.invoke('settings:get'),
-  updateSettings:  (patch: Partial<AppSettings>): Promise<void>                  => ipcRenderer.invoke('settings:update', patch),
+  getSettings:       ():                             Promise<AppSettings>                          => ipcRenderer.invoke('settings:get'),
+  updateSettings:    (patch: Partial<AppSettings>):  Promise<void>                                 => ipcRenderer.invoke('settings:update', patch),
 
   // Event listeners — return cleanup functions to prevent listener accumulation
   onStatusUpdate: (cb: (data: unknown) => void): (() => void) => {
