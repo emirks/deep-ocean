@@ -1,4 +1,4 @@
-import type { Rule } from '../../types'
+import type { Rule, TargetStatus } from '../../types'
 import type { IBlocker } from './BaseBlocker'
 import { FolderBlocker } from './FolderBlocker'
 import { AppBlocker } from './AppBlocker'
@@ -14,7 +14,9 @@ export const BlockerEngine = {
   getTypes: (): { type: string; label: string }[] =>
     Object.values(registry).map(b => ({ type: b.type, label: b.label })),
 
-  block:     (rule: Rule) => registry[rule.type].block(rule.config),
-  unblock:   (rule: Rule) => registry[rule.type].unblock(rule.config),
-  getStatus: (rule: Rule) => registry[rule.type].getStatus(rule.config)
+  block:             (rule: Rule) => registry[rule.type].block(rule.config),
+  unblock:           (rule: Rule) => registry[rule.type].unblock(rule.config),
+  getStatus:         (rule: Rule) => registry[rule.type].getStatus(rule.config),
+  getTargetStatuses: (rule: Rule): Promise<TargetStatus[]> =>
+    registry[rule.type].getTargetStatuses(rule.config)
 }

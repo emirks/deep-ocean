@@ -47,21 +47,33 @@ export class AppBlocker implements IBlocker {
     const apps = getApps(config)
     if (apps.length === 0) return 'error'
     try {
-      const results = await Promise.all(
-        apps.map(async ({ exePath }) => {
-          const { stdout } = await execFileAsync('icacls', [exePath])
-          const lowerUser = username.toLowerCase()
-          return stdout.split('\n').some(line => {
-            const l = line.toLowerCase()
-            return l.includes(lowerUser) && l.includes('deny')
-          })
-        })
-      )
+      const results = await Promise.all(apps.map(({ exePath }) => this._isDenied(exePath)))
       if (results.some(Boolean)) return 'blocked'
       return 'unblocked'
     } catch {
       return 'error'
     }
+  }
+
+  async getTargetStatuses(config: BlockerConfig): Promise<TargetStatus[]> {
+    const apps = getApps(config)
+    return Promise.all(apps.map(async ({ exeName, exePath }) => {
+      try {
+        const denied = await this._isDenied(exePath)
+        return { label: exeName || exePath.split(/[\\/]/).pop() || exePath, status: denied ? 'blocked' as const : 'unblocked' as const }
+      } catch {
+        return { label: exeName, status: 'error' as const }
+      }
+    }))
+  }
+
+  private async _isDenied(exePath: string): Promise<boolean> {
+    const { stdout } = await execFileAsync('icacls', [exePath])
+    const lowerUser = username.toLowerCase()
+    return stdout.split('\n').some(line => {
+      const l = line.toLowerCase()
+      return l.includes(lowerUser) && l.includes('deny')
+    })
   }
 }
 

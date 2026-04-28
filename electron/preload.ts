@@ -1,10 +1,11 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import type { Rule, AppSettings } from '../types'
+import type { Rule, AppSettings, TargetStatus } from '../types'
 
 const api = {
   // Rules
-  getRules:        ():                                           Promise<Rule[]>    => ipcRenderer.invoke('rules:get-all'),
-  syncRules:       ():                                           Promise<Rule[]>    => ipcRenderer.invoke('rules:sync'),
+  getRules:             ():  Promise<Rule[]>                                        => ipcRenderer.invoke('rules:get-all'),
+  syncRules:            ():  Promise<Rule[]>                                        => ipcRenderer.invoke('rules:sync'),
+  getTargetStatuses:    ():  Promise<Record<string, TargetStatus[]>>               => ipcRenderer.invoke('rules:get-target-statuses'),
   addRule:         (rule: Omit<Rule,'id'|'status'|'createdAt'>): Promise<Rule>     => ipcRenderer.invoke('rules:add', rule),
   updateRule:      (data: { id: string } & Partial<Rule>):       Promise<Rule>     => ipcRenderer.invoke('rules:update', data),
   removeRule:      (id: string):                                 Promise<void>     => ipcRenderer.invoke('rules:remove', { id }),

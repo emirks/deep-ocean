@@ -219,6 +219,20 @@ ipcMain.handle('rules:sync', async () => {
   return syncAllStatuses()
 })
 
+/** Returns per-target live OS state for every rule — used by the per-target status dots. */
+ipcMain.handle('rules:get-target-statuses', async () => {
+  const rules = store.get('rules')
+  const result: Record<string, import('../types').TargetStatus[]> = {}
+  await Promise.all(rules.map(async rule => {
+    try {
+      result[rule.id] = await BlockerEngine.getTargetStatuses(rule)
+    } catch {
+      result[rule.id] = []
+    }
+  }))
+  return result
+})
+
 // ─── IPC: Blockers ─────────────────────────────────────────────────────────────
 
 ipcMain.handle('blockers:types', () => BlockerEngine.getTypes())

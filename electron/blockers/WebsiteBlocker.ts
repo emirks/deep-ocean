@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { BlockerConfig, WebsiteConfig, RuleStatus } from '../../types'
+import type { BlockerConfig, WebsiteConfig, RuleStatus, TargetStatus } from '../../types'
 import type { IBlocker } from './BaseBlocker'
 
 const execFileAsync = promisify(execFile)
@@ -69,6 +69,22 @@ export class WebsiteBlocker implements IBlocker {
       return allBlocked ? 'blocked' : 'unblocked'
     } catch {
       return 'error'
+    }
+  }
+
+  async getTargetStatuses(config: BlockerConfig): Promise<TargetStatus[]> {
+    const { domains } = config as WebsiteConfig
+    try {
+      const content = await fs.readFile(HOSTS_FILE, 'utf8')
+      // Show the user-facing domain (apex), not the expanded variants
+      return domains.map(d => ({
+        label: d,
+        status: allVariants([d]).every(v => content.includes(makeEntry(v)))
+          ? 'blocked' as const
+          : 'unblocked' as const
+      }))
+    } catch {
+      return domains.map(d => ({ label: d, status: 'error' as const }))
     }
   }
 }
