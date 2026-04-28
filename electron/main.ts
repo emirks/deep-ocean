@@ -8,6 +8,9 @@ import { initScheduler, reloadScheduler, isWithinSchedule } from './scheduler'
 import { startProcessMonitor } from './processMonitor'
 import { createTray } from './tray'
 import { notify } from './notifications'
+import { createLogger } from './logger'
+
+const log = createLogger('Main')
 
 let mainWin: BrowserWindow | null = null
 
@@ -16,6 +19,7 @@ function getMainWin(): BrowserWindow | null {
 }
 
 function sendStatus(id: string, status: RuleStatus): void {
+  log.debug(`sendStatus — id=${id} status=${status}`)
   getMainWin()?.webContents.send('rules:status-update', { id, status })
 }
 
@@ -27,6 +31,7 @@ function updateStoreStatus(id: string, status: RuleStatus): void {
 function migrateRules(): void {
   const raw = store.get('rules') as any[]
   if (!raw.length) return
+  log.info(`Migrating ${raw.length} rule(s) — ensuring enabled/gateways fields`)
   const migrated = raw.map((r: any) => ({
     ...r,
     enabled:  r.enabled  !== undefined ? r.enabled  : true,
@@ -41,16 +46,24 @@ function migrateRules(): void {
  */
 async function syncAllStatuses(): Promise<Rule[]> {
   const rules = store.get('rules')
+  log.info(`syncAllStatuses — checking ${rules.length} rule(s)`)
   const updated = await Promise.all(
     rules.map(async (rule): Promise<Rule> => {
-      if (rule.status === 'locking' || rule.status === 'unlocking') return rule
+      if (rule.status === 'locking' || rule.status === 'unlocking') {
+        log.debug(`  "${rule.label}" skipped — in-transit (${rule.status})`)
+        return rule
+      }
       try {
         const actual = await BlockerEngine.getStatus(rule)
         if (actual !== rule.status) {
+          log.info(`  "${rule.label}" status drift — stored=${rule.status} actual=${actual} → syncing`)
           sendStatus(rule.id, actual)
           return { ...rule, status: actual }
         }
-      } catch { /* leave as-is on error */ }
+        log.debug(`  "${rule.label}" status OK (${actual})`)
+      } catch (e) {
+        log.error(`  "${rule.label}" getStatus threw:`, e)
+      }
       return rule
     })
   )
@@ -59,6 +72,7 @@ async function syncAllStatuses(): Promise<Rule[]> {
 }
 
 function createWindow(): BrowserWindow {
+  log.info('Creating main window')
   const win = new BrowserWindow({
     width: 960,
     height: 680,
@@ -78,23 +92,34 @@ function createWindow(): BrowserWindow {
 
   if (process.env['ELECTRON_RENDERER_URL']) {
     win.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    log.debug(`Renderer loading from dev server: ${process.env['ELECTRON_RENDERER_URL']}`)
   } else {
     win.loadFile(path.join(__dirname, '../renderer/index.html'))
+    log.debug('Renderer loading from built file')
   }
 
   win.on('close', (e) => {
     e.preventDefault()
     win.hide()
+    log.info('Window close intercepted — minimised to tray')
   })
 
   win.on('show', () => {
-    syncAllStatuses().catch(e => console.error('[sync] show error', e))
+    log.info('Window shown — syncing all statuses')
+    syncAllStatuses().catch(e => log.error('syncAllStatuses on show failed:', e))
+  })
+
+  win.webContents.on('did-finish-load', () => {
+    log.info('Renderer did-finish-load')
   })
 
   return win
 }
 
+// ─── App lifecycle ──────────────────────────────────────────────────────────────
+
 app.whenReady().then(() => {
+  log.info('App ready — starting DeepOcean')
   migrateRules()
   mainWin = createWindow()
   createTray(mainWin)
@@ -102,24 +127,34 @@ app.whenReady().then(() => {
   startProcessMonitor()
 
   const settings = store.get('settings')
+  log.info(`Settings loaded — launchAtStartup=${settings.launchAtStartup} notifications=${settings.notifications} preNotificationMinutes=${settings.preNotificationMinutes} theme=${settings.theme}`)
   if (settings.launchAtStartup) {
     app.setLoginItemSettings({ openAtLogin: true })
   }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
+      log.info('Activate event — recreating window')
       mainWin = createWindow()
     }
   })
 })
 
 app.on('window-all-closed', () => {
+  log.info('All windows closed')
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', () => {
+  log.info('App quitting — active OS blocks will persist until next enable cycle')
 })
 
 // ─── IPC: Rules ────────────────────────────────────────────────────────────────
 
-ipcMain.handle('rules:get-all', () => store.get('rules'))
+ipcMain.handle('rules:get-all', () => {
+  log.debug('IPC rules:get-all')
+  return store.get('rules')
+})
 
 ipcMain.handle('rules:add', async (_e, ruleData: Omit<Rule, 'id' | 'status' | 'createdAt'>) => {
   const newRule: Rule = {
@@ -130,20 +165,24 @@ ipcMain.handle('rules:add', async (_e, ruleData: Omit<Rule, 'id' | 'status' | 'c
     status: 'unblocked',
     createdAt: new Date().toISOString()
   }
+  log.info(`IPC rules:add — label="${newRule.label}" type=${newRule.type} enabled=${newRule.enabled} schedules=${newRule.schedules.length}`)
   store.set('rules', [...store.get('rules'), newRule])
   reloadScheduler()
 
-  // If newly added rule is enabled and currently in a schedule window, lock immediately
   if (newRule.enabled && isWithinSchedule(newRule.schedules)) {
+    log.info(`  New rule is within schedule window — locking immediately`)
     updateStoreStatus(newRule.id, 'locking')
     sendStatus(newRule.id, 'locking')
     try {
       await BlockerEngine.block(newRule)
       updateStoreStatus(newRule.id, 'blocked')
       sendStatus(newRule.id, 'blocked')
+      log.info(`  Immediate lock complete — "${newRule.label}"`)
     } catch (e) {
-      console.error('[rules:add] block error', e)
+      log.error(`  Immediate lock failed — "${newRule.label}":`, e)
     }
+  } else {
+    log.debug(`  Not within schedule window — no immediate lock`)
   }
   return store.get('rules').find(r => r.id === newRule.id) ?? newRule
 })
@@ -152,10 +191,15 @@ ipcMain.handle('rules:update', (_e, data: { id: string } & Partial<Rule>) => {
   const { id, ...patch } = data
   const rules = store.get('rules')
   const idx = rules.findIndex(r => r.id === id)
-  if (idx === -1) throw new Error(`Rule ${id} not found`)
-  const updated = { ...rules[idx], ...patch } as Rule
+  if (idx === -1) {
+    log.error(`IPC rules:update — rule id=${id} not found`)
+    throw new Error(`Rule ${id} not found`)
+  }
+  const before = rules[idx]
+  const updated = { ...before, ...patch } as Rule
   rules[idx] = updated
   store.set('rules', rules)
+  log.info(`IPC rules:update — "${updated.label}" patch keys: ${Object.keys(patch).join(', ')}`)
   reloadScheduler()
   return updated
 })
@@ -164,51 +208,60 @@ ipcMain.handle('rules:remove', async (_e, { id }: { id: string }) => {
   const rules = store.get('rules')
   const rule = rules.find(r => r.id === id)
   if (rule) {
-    try { await BlockerEngine.unblock(rule) } catch { /* ignore */ }
+    log.info(`IPC rules:remove — "${rule.label}" (${id}) — unblocking before removal`)
+    try {
+      await BlockerEngine.unblock(rule)
+      log.info(`  Unblock complete for removed rule "${rule.label}"`)
+    } catch (e) {
+      log.warn(`  Unblock failed for removed rule "${rule.label}" (may already be clear):`, e)
+    }
+  } else {
+    log.warn(`IPC rules:remove — id=${id} not found in store`)
   }
   store.set('rules', rules.filter(r => r.id !== id))
   reloadScheduler()
 })
 
-/**
- * Enable a rule — arms the scheduler. If currently in a schedule window,
- * applies the OS lock immediately.
- */
 ipcMain.handle('rules:enable', async (_e, { id }: { id: string }) => {
   const rules = store.get('rules')
   const rule = rules.find(r => r.id === id)
-  if (!rule) throw new Error(`Rule ${id} not found`)
-
+  if (!rule) {
+    log.error(`IPC rules:enable — rule id=${id} not found`)
+    throw new Error(`Rule ${id} not found`)
+  }
+  log.info(`IPC rules:enable — "${rule.label}" (${id})`)
   store.set('rules', rules.map(r => r.id === id ? { ...r, enabled: true } : r))
   reloadScheduler()
 
   if (isWithinSchedule(rule.schedules)) {
+    log.info(`  Within schedule window — locking immediately`)
     updateStoreStatus(id, 'locking')
     sendStatus(id, 'locking')
     try {
       await BlockerEngine.block(rule)
       updateStoreStatus(id, 'blocked')
       sendStatus(id, 'blocked')
+      log.info(`  Lock applied — "${rule.label}"`)
       notify('DeepOcean — Rule enabled & locked', rule.label)
     } catch (e) {
-      console.error('[rules:enable] block error', e)
+      log.error(`  Lock failed — "${rule.label}":`, e)
       updateStoreStatus(id, 'error')
       sendStatus(id, 'error')
     }
   } else {
+    log.info(`  Not within schedule window — rule armed, will lock per schedule`)
     notify('DeepOcean — Rule enabled', `${rule.label} — will lock per schedule`)
   }
 })
 
-/**
- * Disable a rule — disarms the scheduler and removes the OS lock.
- * The gateway check is enforced by the renderer before calling this.
- */
 ipcMain.handle('rules:disable', async (_e, { id }: { id: string }) => {
   const rules = store.get('rules')
   const rule = rules.find(r => r.id === id)
-  if (!rule) throw new Error(`Rule ${id} not found`)
-
+  if (!rule) {
+    log.error(`IPC rules:disable — rule id=${id} not found`)
+    throw new Error(`Rule ${id} not found`)
+  }
+  log.info(`IPC rules:disable — "${rule.label}" (${id})`)
   store.set('rules', rules.map(r => r.id === id ? { ...r, enabled: false } : r))
   reloadScheduler()
 
@@ -218,25 +271,30 @@ ipcMain.handle('rules:disable', async (_e, { id }: { id: string }) => {
     await BlockerEngine.unblock(rule)
     updateStoreStatus(id, 'unblocked')
     sendStatus(id, 'unblocked')
+    log.info(`  Unlock applied — "${rule.label}"`)
     notify('DeepOcean — Rule disabled', rule.label)
   } catch (e) {
-    console.error('[rules:disable] unblock error', e)
+    log.error(`  Unlock failed — "${rule.label}":`, e)
     updateStoreStatus(id, 'error')
     sendStatus(id, 'error')
   }
 })
 
-/** Reconcile UI with actual OS state — only updates status, never enabled. */
-ipcMain.handle('rules:sync', async () => syncAllStatuses())
+ipcMain.handle('rules:sync', async () => {
+  log.debug('IPC rules:sync')
+  return syncAllStatuses()
+})
 
-/** Per-target live OS state for all rules. */
 ipcMain.handle('rules:get-target-statuses', async () => {
   const rules = store.get('rules')
+  log.debug(`IPC rules:get-target-statuses — ${rules.length} rule(s)`)
   const result: Record<string, import('../types').TargetStatus[]> = {}
   await Promise.all(rules.map(async rule => {
     try {
       result[rule.id] = await BlockerEngine.getTargetStatuses(rule)
-    } catch {
+      log.debug(`  "${rule.label}": ${result[rule.id].map(t => `${t.label}=${t.status}`).join(', ')}`)
+    } catch (e) {
+      log.error(`  getTargetStatuses failed for "${rule.label}":`, e)
       result[rule.id] = []
     }
   }))
@@ -245,42 +303,57 @@ ipcMain.handle('rules:get-target-statuses', async () => {
 
 // ─── IPC: Blockers ─────────────────────────────────────────────────────────────
 
-ipcMain.handle('blockers:types', () => BlockerEngine.getTypes())
+ipcMain.handle('blockers:types', () => {
+  log.debug('IPC blockers:types')
+  return BlockerEngine.getTypes()
+})
 
 // ─── IPC: Dialogs ──────────────────────────────────────────────────────────────
 
 ipcMain.handle('dialog:folder', async () => {
+  log.debug('IPC dialog:folder — opening folder picker')
   const result = await dialog.showOpenDialog(getMainWin()!, { properties: ['openDirectory'] })
+  log.info(`dialog:folder — ${result.canceled ? 'cancelled' : `selected: "${result.filePaths[0]}"`}`)
   return result.canceled ? null : result.filePaths[0]
 })
 
 ipcMain.handle('dialog:exe', async () => {
+  log.debug('IPC dialog:exe — opening exe picker')
   const result = await dialog.showOpenDialog(getMainWin()!, {
     properties: ['openFile'],
     filters: [{ name: 'Executables', extensions: ['exe'] }]
   })
+  log.info(`dialog:exe — ${result.canceled ? 'cancelled' : `selected: "${result.filePaths[0]}"`}`)
   return result.canceled ? null : result.filePaths[0]
 })
 
 // ─── IPC: Settings ─────────────────────────────────────────────────────────────
 
-ipcMain.handle('settings:get', () => store.get('settings'))
+ipcMain.handle('settings:get', () => {
+  log.debug('IPC settings:get')
+  return store.get('settings')
+})
 
 ipcMain.handle('settings:update', (_e, patch: Partial<ReturnType<typeof store.get>['settings']>) => {
+  log.info(`IPC settings:update — keys: ${Object.keys(patch).join(', ')}`, patch)
   const current = store.get('settings')
   const updated = { ...current, ...patch }
   store.set('settings', updated)
   if ('launchAtStartup' in patch) {
     app.setLoginItemSettings({ openAtLogin: updated.launchAtStartup })
+    log.info(`  launchAtStartup → ${updated.launchAtStartup}`)
   }
   if ('theme' in patch) {
     getMainWin()?.webContents.send('settings:theme-changed', updated.theme)
+    log.info(`  theme → ${updated.theme}`)
   }
   if ('preNotificationMinutes' in patch) {
+    log.info(`  preNotificationMinutes → ${updated.preNotificationMinutes} — reloading scheduler`)
     reloadScheduler()
   }
 })
 
 ipcMain.handle('shell:open-path', (_e, filePath: string) => {
+  log.info(`IPC shell:open-path — "${filePath}"`)
   shell.openPath(filePath)
 })
