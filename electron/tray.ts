@@ -1,16 +1,22 @@
 import { Tray, Menu, app, nativeImage, BrowserWindow } from 'electron'
 import path from 'node:path'
+import { createLogger } from './logger'
+
+const log = createLogger('Tray')
 
 let tray: Tray | null = null
 
 export function createTray(mainWindow: BrowserWindow): void {
   const iconPath = path.join(app.getAppPath(), 'resources', 'icon.png')
-  let icon: Electron.NativeImage
+  log.info(`Creating tray — icon: "${iconPath}"`)
 
+  let icon: Electron.NativeImage
   try {
     icon = nativeImage.createFromPath(iconPath)
+    log.debug('Tray icon loaded from file')
   } catch {
     icon = nativeImage.createEmpty()
+    log.warn('Tray icon not found — using empty icon')
   }
 
   tray = new Tray(icon)
@@ -20,6 +26,7 @@ export function createTray(mainWindow: BrowserWindow): void {
     {
       label: 'Open DeepOcean',
       click: () => {
+        log.info('Tray → Open DeepOcean clicked')
         mainWindow.show()
         mainWindow.focus()
       }
@@ -28,8 +35,7 @@ export function createTray(mainWindow: BrowserWindow): void {
     {
       label: 'Quit DeepOcean',
       click: () => {
-        // Remove the close intercept so the window can actually close,
-        // then exit. Active blocks are NOT cleared — NTFS ACLs persist.
+        log.info('Tray → Quit DeepOcean clicked — active OS blocks will persist')
         mainWindow.removeAllListeners('close')
         app.exit(0)
       }
@@ -39,14 +45,18 @@ export function createTray(mainWindow: BrowserWindow): void {
   tray.setContextMenu(contextMenu)
 
   tray.on('double-click', () => {
+    log.info('Tray double-clicked — showing window')
     mainWindow.show()
     mainWindow.focus()
   })
+
+  log.info('Tray created')
 }
 
 export function destroyTray(): void {
   if (tray) {
     tray.destroy()
     tray = null
+    log.info('Tray destroyed')
   }
 }
