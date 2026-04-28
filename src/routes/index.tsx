@@ -3,23 +3,34 @@ import { rootRoute } from './__root'
 import { useRulesStore } from '@/stores/rulesStore'
 import { RuleCard } from '@/components/RuleCard'
 import { Button } from '@/components/ui/button'
-import { PlusCircle, PauseCircle, Waves } from 'lucide-react'
+import { PlusCircle, Power, Waves } from 'lucide-react'
 import { useState } from 'react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 
 function Dashboard() {
   const rules = useRulesStore(s => s.rules)
+  const setRules = useRulesStore(s => s.setRules)
+  const setEnabled = useRulesStore(s => s.setEnabled)
   const navigate = useNavigate()
-  const [pauseOpen, setPauseOpen] = useState(false)
-  const [pauseMinutes, setPauseMinutes] = useState('30')
+  const [disableAllOpen, setDisableAllOpen] = useState(false)
+  const [disabling, setDisabling] = useState(false)
 
-  const handlePauseAll = async () => {
-    await window.api.pauseAll(Number(pauseMinutes))
-    setPauseOpen(false)
+  const handleDisableAll = async () => {
+    const toDisable = useRulesStore.getState().rules.filter(r => r.enabled)
+    setDisabling(true)
+    try {
+      for (const r of toDisable) {
+        setEnabled(r.id, false)
+        await window.api.disableRule(r.id)
+      }
+      const synced = await window.api.syncRules()
+      setRules(synced)
+      setDisableAllOpen(false)
+    } finally {
+      setDisabling(false)
+    }
   }
 
   return (
@@ -29,14 +40,14 @@ function Dashboard() {
         <div>
           <h1 className="text-lg font-semibold">Dashboard</h1>
           <p className="text-xs text-muted-foreground">
-            {rules.filter(r => r.status === 'blocked').length} blocked · {rules.length} total rules
+            {rules.filter(r => r.enabled).length} active · {rules.length} total rules
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {rules.length > 0 && (
-            <Button variant="outline" size="sm" onClick={() => setPauseOpen(true)}>
-              <PauseCircle className="h-4 w-4 mr-1.5" />
-              Pause All
+          {rules.some(r => r.enabled) && (
+            <Button variant="outline" size="sm" onClick={() => setDisableAllOpen(true)}>
+              <Power className="h-4 w-4 mr-1.5" />
+              Disable all
             </Button>
           )}
           <Button size="sm" onClick={() => navigate({ to: '/add-rule' })}>
@@ -73,28 +84,21 @@ function Dashboard() {
         )}
       </div>
 
-      {/* Pause All Dialog */}
-      <Dialog open={pauseOpen} onOpenChange={setPauseOpen}>
+      <Dialog open={disableAllOpen} onOpenChange={setDisableAllOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Pause All Rules</DialogTitle>
+            <DialogTitle>Disable all rules</DialogTitle>
             <DialogDescription>
-              Temporarily unblock everything. Rules will re-engage automatically after the duration.
+              Every active rule will be turned off and its OS locks removed. You can enable rules again from each card.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 py-2">
-            <Label>Duration (minutes)</Label>
-            <Input
-              type="number"
-              min={1}
-              max={480}
-              value={pauseMinutes}
-              onChange={e => setPauseMinutes(e.target.value)}
-            />
-          </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPauseOpen(false)}>Cancel</Button>
-            <Button onClick={handlePauseAll}>Pause for {pauseMinutes} min</Button>
+            <Button variant="outline" onClick={() => setDisableAllOpen(false)} disabled={disabling}>
+              Cancel
+            </Button>
+            <Button onClick={handleDisableAll} disabled={disabling}>
+              {disabling ? 'Disabling…' : 'Disable all'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

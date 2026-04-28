@@ -17,7 +17,7 @@ import { useRulesStore } from '@/stores/rulesStore'
 import { ArrowLeft, Save, ShieldCheck } from 'lucide-react'
 import type {
   BlockerType, BlockerConfig, FolderConfig, AppConfig, WebsiteConfig,
-  Schedule, Gateway, PhraseGateway
+  Schedule, Gateway, PhraseGateway, Rule
 } from '../../types'
 
 const defaultConfig: Record<BlockerType, BlockerConfig> = {
@@ -93,7 +93,11 @@ function AddRule() {
           useRulesStore.getState().rules.map(r => r.id === editId ? updated : r)
         )
       } else {
-        const rule = await window.api.addRule({ label, type, config, schedules, gateways })
+        const newRule: Omit<Rule, 'id' | 'status' | 'createdAt'> = {
+          label, type, config, schedules, gateways,
+          enabled: true  // new rules are enabled by default
+        }
+        const rule = await window.api.addRule(newRule)
         addRule(rule)
       }
       navigate({ to: '/' })
