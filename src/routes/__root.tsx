@@ -6,7 +6,9 @@ import { useRulesStore } from '@/stores/rulesStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useTargetStatusStore } from '@/stores/targetStatusStore'
 
-const TARGET_POLL_INTERVAL_MS = 10_000
+// Safety-net poll — only runs while the window is visible.
+// Real-time updates come from IPC status-update events (see onStatusUpdate below).
+const TARGET_POLL_INTERVAL_MS = 8_000
 
 function RootLayout() {
   const setRules    = useRulesStore(s => s.setRules)
@@ -44,13 +46,11 @@ function RootLayout() {
     syncTargetStatuses()
   }
 
-  // ── Polling while window is focused ─────────────────────────────────────────
+  // ── Polling — only while the window is visible ──────────────────────────────
 
   const startPolling = () => {
-    if (pollTimer.current) return
-    pollTimer.current = setInterval(() => {
-      if (document.hasFocus()) syncTargetStatuses()
-    }, TARGET_POLL_INTERVAL_MS)
+    stopPolling()
+    pollTimer.current = setInterval(syncTargetStatuses, TARGET_POLL_INTERVAL_MS)
   }
 
   const stopPolling = () => {
@@ -63,16 +63,14 @@ function RootLayout() {
   // ── Boot & event wiring ─────────────────────────────────────────────────────
 
   useEffect(() => {
-    // Initial load
     syncAll()
     window.api.getSettings().then(setSettings)
 
-    // IPC events from main (scheduled blocks, re-blocks after temp-unblock, etc.)
+    // IPC events from main process — immediate dot refresh on any state change
     const cleanupStatus = window.api.onStatusUpdate((data: unknown) => {
       const d = data as { id?: string; status?: string }
       if (d.id && d.status) {
         useRulesStore.getState().updateStatus(d.id, d.status as never)
-        // Refresh per-target dots after any status change
         syncTargetStatuses()
       }
     })
@@ -81,17 +79,29 @@ function RootLayout() {
       applyTheme(theme)
     })
 
-    // Re-sync when the tab/window regains focus
+    // Re-sync the moment the window regains focus
     const onFocus = () => syncAll()
     window.addEventListener('focus', onFocus)
 
-    // Poll per-target statuses while focused
+    // Start / stop the safety-net poll based on page visibility
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        syncAll()      // catch anything that changed while hidden
+        startPolling()
+      } else {
+        stopPolling()  // no wasted IPC calls while minimised / hidden
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    // Start polling immediately (window is visible on mount)
     startPolling()
 
     return () => {
       cleanupStatus()
       cleanupTheme()
       window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
       stopPolling()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
