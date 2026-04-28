@@ -1,19 +1,43 @@
+// ─── Block types ───────────────────────────────────────────────────────────────
+
 export type BlockerType = 'folder' | 'app' | 'website'
-export type RuleStatus = 'blocked' | 'unblocked' | 'paused' | 'error'
+
+/**
+ * locking/unlocking = transition in progress (icacls may take time on large trees).
+ * The UI shows a spinner for these states.
+ */
+export type RuleStatus = 'blocked' | 'unblocked' | 'locking' | 'unlocking' | 'error'
 
 export interface Schedule {
-  days: number[]      // 0=Sun, 1=Mon ... 6=Sat
-  lockTime: string    // "09:00"
-  unlockTime: string  // "18:00"
+  days: number[]     // 0=Sun … 6=Sat
+  lockTime: string   // "09:00"
+  unlockTime: string // "18:00"
 }
 
+/**
+ * Live OS state for a single target (one folder path, one exe, one domain).
+ * Distinct from the rule-level status which aggregates all targets.
+ */
+export interface TargetStatus {
+  /** Human-readable label — folder name, exe name, or domain */
+  label: string
+  /** Actual OS state for this specific target */
+  status: 'blocked' | 'unblocked' | 'error'
+}
+
+// ─── Block configs ─────────────────────────────────────────────────────────────
+
 export interface FolderConfig {
-  path: string
+  paths: string[]
+}
+
+export interface AppTarget {
+  exeName: string
+  exePath: string
 }
 
 export interface AppConfig {
-  exeName: string
-  exePath: string
+  apps: AppTarget[]
 }
 
 export interface WebsiteConfig {
@@ -22,20 +46,45 @@ export interface WebsiteConfig {
 
 export type BlockerConfig = FolderConfig | AppConfig | WebsiteConfig
 
+// ─── Gateways ──────────────────────────────────────────────────────────────────
+//
+// A Gateway is a friction layer that must be cleared before a rule can be
+// manually unblocked. Scheduled unlocks bypass gateways (they are pre-committed).
+//
+// Current building blocks:
+//   phrase  — type a specific text phrase
+//
+// Planned:
+//   timer   — must wait N minutes after requesting
+//   email   — confirm via email link
+//   telegram — confirm via Telegram bot message
+
+export interface PhraseGateway {
+  type: 'phrase'
+  phrase: string
+}
+
+export type Gateway = PhraseGateway  // union-extend here as more are added
+
+// ─── Rule ──────────────────────────────────────────────────────────────────────
+
 export interface Rule {
   id: string
   type: BlockerType
   label: string
   config: BlockerConfig
   schedules: Schedule[]
+  gateways: Gateway[]
   status: RuleStatus
   createdAt: string
 }
 
+// ─── Settings ──────────────────────────────────────────────────────────────────
+
 export interface AppSettings {
   launchAtStartup: boolean
   notifications: boolean
-  confirmationPhrase: string
-  confirmationPhraseEnabled: boolean
+  /** Minutes before a schedule lock to send a warning notification. 0 = disabled. */
+  preNotificationMinutes: number
   theme: 'light' | 'dark' | 'system'
 }
