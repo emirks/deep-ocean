@@ -24,10 +24,6 @@ function toCron(time: string, days: number[]): string {
   return `${minute} ${hour} * * ${dayStr}`
 }
 
-/**
- * Returns a time string N minutes before the given "HH:MM" time.
- * Returns null if the result would be negative (i.e. lockTime is too close to midnight).
- */
 function minutesBefore(time: string, minutes: number): string | null {
   const [h, m] = time.split(':').map(Number)
   const total = h * 60 + m - minutes
@@ -37,7 +33,8 @@ function minutesBefore(time: string, minutes: number): string | null {
   return `${String(nh).padStart(2, '0')}:${String(nm).padStart(2, '0')}`
 }
 
-function isWithinSchedule(schedules: Schedule[]): boolean {
+/** Exported so main.ts can use it for immediate enable/disable decisions. */
+export function isWithinSchedule(schedules: Schedule[]): boolean {
   const now = new Date()
   const day = now.getDay()
   const minutes = now.getHours() * 60 + now.getMinutes()
@@ -55,8 +52,15 @@ export function initScheduler(): void {
   const { preNotificationMinutes } = store.get('settings')
 
   for (const rule of rules) {
+    if (!rule.enabled) {
+      // Disabled rules must have no OS locks — clear any lingering ones from a previous session
+      BlockerEngine.unblock(rule).catch(() => { /* path may not exist */ })
+      continue
+    }
+
+    // ── Schedule cron jobs for this enabled rule ──────────────────────────────
+
     for (const schedule of rule.schedules) {
-      // Lock task
       const blockTask = cron.schedule(toCron(schedule.lockTime, schedule.days), async () => {
         try {
           updateRuleStatus(rule.id, 'locking')
@@ -64,7 +68,7 @@ export function initScheduler(): void {
           await BlockerEngine.block(rule)
           updateRuleStatus(rule.id, 'blocked')
           sendStatusUpdate(rule.id, 'blocked')
-          notify('DeepOcean — Blocked', rule.label)
+          notify('DeepOcean — Locked', rule.label)
         } catch (e) {
           console.error('[scheduler] block error', e)
           updateRuleStatus(rule.id, 'error')
@@ -73,7 +77,6 @@ export function initScheduler(): void {
       })
       activeTasks.push(blockTask)
 
-      // Unlock task
       const unblockTask = cron.schedule(toCron(schedule.unlockTime, schedule.days), async () => {
         try {
           updateRuleStatus(rule.id, 'unlocking')
@@ -81,7 +84,7 @@ export function initScheduler(): void {
           await BlockerEngine.unblock(rule)
           updateRuleStatus(rule.id, 'unblocked')
           sendStatusUpdate(rule.id, 'unblocked')
-          notify('DeepOcean — Unblocked', rule.label)
+          notify('DeepOcean — Unlocked', rule.label)
         } catch (e) {
           console.error('[scheduler] unblock error', e)
           updateRuleStatus(rule.id, 'error')
@@ -90,27 +93,28 @@ export function initScheduler(): void {
       })
       activeTasks.push(unblockTask)
 
-      // Pre-notification task (fires N minutes before lock)
       if (preNotificationMinutes > 0) {
         const preTime = minutesBefore(schedule.lockTime, preNotificationMinutes)
         if (preTime) {
           const preTask = cron.schedule(toCron(preTime, schedule.days), () => {
-            notify(
-              `DeepOcean — Locking in ${preNotificationMinutes} min`,
-              rule.label
-            )
+            notify(`DeepOcean — Locking in ${preNotificationMinutes} min`, rule.label)
           })
           activeTasks.push(preTask)
         }
       }
     }
 
-    // On startup: reconcile actual filesystem state with the schedule
-    const shouldBeBlocked = rule.schedules.length > 0 && isWithinSchedule(rule.schedules)
-    if (shouldBeBlocked && rule.status !== 'blocked') {
-      BlockerEngine.block(rule).catch(e => console.error('[scheduler] startup block error', e))
-    } else if (!shouldBeBlocked && rule.status === 'blocked') {
-      BlockerEngine.unblock(rule).catch(e => console.error('[scheduler] startup unblock error', e))
+    // ── Startup reconciliation for enabled rules ──────────────────────────────
+    // Apply the correct OS state based on whether we're inside a schedule window.
+    const shouldBeBlocked = isWithinSchedule(rule.schedules)
+    if (shouldBeBlocked) {
+      BlockerEngine.block(rule)
+        .then(() => updateRuleStatus(rule.id, 'blocked'))
+        .catch(e => console.error('[scheduler] startup block error', e))
+    } else {
+      BlockerEngine.unblock(rule)
+        .then(() => updateRuleStatus(rule.id, 'unblocked'))
+        .catch(e => console.error('[scheduler] startup unblock error', e))
     }
   }
 }
