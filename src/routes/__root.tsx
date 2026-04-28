@@ -4,11 +4,19 @@ import { cn } from '@/lib/utils'
 import { useEffect, useRef } from 'react'
 import { useRulesStore } from '@/stores/rulesStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useTargetStatusStore } from '@/stores/targetStatusStore'
+
+const TARGET_POLL_INTERVAL_MS = 10_000
 
 function RootLayout() {
   const setRules    = useRulesStore(s => s.setRules)
   const setSettings = useSettingsStore(s => s.setSettings)
-  const syncing     = useRef(false)
+  const setAllTargetStatuses = useTargetStatusStore(s => s.setAll)
+
+  const syncing       = useRef(false)
+  const pollTimer     = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // ── Sync helpers ────────────────────────────────────────────────────────────
 
   const syncRules = async () => {
     if (syncing.current) return
@@ -17,7 +25,6 @@ function RootLayout() {
       const rules = await window.api.syncRules()
       setRules(rules)
     } catch {
-      // Fallback: just fetch stored values without OS reconciliation
       const rules = await window.api.getRules()
       setRules(rules)
     } finally {
@@ -25,16 +32,48 @@ function RootLayout() {
     }
   }
 
-  useEffect(() => {
-    // Initial load: sync rules with real OS state + load settings
+  const syncTargetStatuses = async () => {
+    try {
+      const all = await window.api.getTargetStatuses()
+      setAllTargetStatuses(all)
+    } catch { /* non-fatal */ }
+  }
+
+  const syncAll = () => {
     syncRules()
+    syncTargetStatuses()
+  }
+
+  // ── Polling while window is focused ─────────────────────────────────────────
+
+  const startPolling = () => {
+    if (pollTimer.current) return
+    pollTimer.current = setInterval(() => {
+      if (document.hasFocus()) syncTargetStatuses()
+    }, TARGET_POLL_INTERVAL_MS)
+  }
+
+  const stopPolling = () => {
+    if (pollTimer.current) {
+      clearInterval(pollTimer.current)
+      pollTimer.current = null
+    }
+  }
+
+  // ── Boot & event wiring ─────────────────────────────────────────────────────
+
+  useEffect(() => {
+    // Initial load
+    syncAll()
     window.api.getSettings().then(setSettings)
 
-    // Status events pushed from main process (scheduled blocks, re-blocks, etc.)
+    // IPC events from main (scheduled blocks, re-blocks after temp-unblock, etc.)
     const cleanupStatus = window.api.onStatusUpdate((data: unknown) => {
-      const d = data as { id?: string; status?: string; pauseAll?: boolean }
+      const d = data as { id?: string; status?: string }
       if (d.id && d.status) {
         useRulesStore.getState().updateStatus(d.id, d.status as never)
+        // Refresh per-target dots after any status change
+        syncTargetStatuses()
       }
     })
 
@@ -42,35 +81,39 @@ function RootLayout() {
       applyTheme(theme)
     })
 
-    // Re-sync when the window regains focus (user may have switched away
-    // and blocks may have changed due to scheduled events)
-    const onFocus = () => syncRules()
+    // Re-sync when the tab/window regains focus
+    const onFocus = () => syncAll()
     window.addEventListener('focus', onFocus)
+
+    // Poll per-target statuses while focused
+    startPolling()
 
     return () => {
       cleanupStatus()
       cleanupTheme()
       window.removeEventListener('focus', onFocus)
+      stopPolling()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Apply theme whenever settings change
-  const theme = useSettingsStore(s => s.theme)
+  // Apply theme reactively
+  const theme  = useSettingsStore(s => s.theme)
   const loaded = useSettingsStore(s => s.loaded)
   useEffect(() => {
     if (loaded) applyTheme(theme)
   }, [theme, loaded])
 
+  // ── Nav ─────────────────────────────────────────────────────────────────────
+
   const navItems = [
-    { to: '/',          icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/add-rule',  icon: PlusCircle,      label: 'Add Rule'  },
-    { to: '/settings',  icon: Settings,        label: 'Settings'  }
+    { to: '/',         icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/add-rule', icon: PlusCircle,      label: 'Add Rule'  },
+    { to: '/settings', icon: Settings,        label: 'Settings'  }
   ]
 
   return (
     <div className="flex h-screen bg-background text-foreground overflow-hidden">
-      {/* Sidebar */}
       <aside className="w-56 flex-shrink-0 border-r border-border bg-sidebar flex flex-col">
         <div className="flex items-center gap-2 px-5 py-5 border-b border-border">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600">
@@ -104,7 +147,6 @@ function RootLayout() {
         </div>
       </aside>
 
-      {/* Main content */}
       <main className="flex-1 overflow-auto">
         <Outlet />
       </main>
