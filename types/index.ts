@@ -75,6 +75,18 @@ export interface Rule {
   config: BlockerConfig
   schedules: Schedule[]
   gateways: Gateway[]
+  /**
+   * User's choice: is this rule armed?
+   * When true the scheduler locks/unlocks according to the schedule.
+   * When false the rule is dormant and all targets are unlocked.
+   * This is the ONLY field the user directly controls.
+   */
+  enabled: boolean
+  /**
+   * Current OS lock state — computed by the scheduler and synced on focus.
+   * Never directly controlled by the user; only updated by the scheduler or
+   * the enable/disable actions.
+   */
   status: RuleStatus
   createdAt: string
 }
