@@ -1,11 +1,12 @@
 import { createRootRoute, Outlet, Link } from '@tanstack/react-router'
-import { LayoutDashboard, PlusCircle, Settings, Shield } from 'lucide-react'
+import { LayoutDashboard, PlusCircle, Settings, Shield, ShieldCheck } from 'lucide-react'
 import logo from '@/assets/logo.png'
 import { cn } from '@/lib/utils'
 import { useEffect, useRef } from 'react'
 import { useRulesStore } from '@/stores/rulesStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useTargetStatusStore } from '@/stores/targetStatusStore'
+import { useGatewaysStore } from '@/stores/gatewaysStore'
 
 // Safety-net poll — only runs while the window is visible.
 // Real-time updates come from IPC status-update events (see onStatusUpdate below).
@@ -15,6 +16,7 @@ function RootLayout() {
   const setRules    = useRulesStore(s => s.setRules)
   const setSettings = useSettingsStore(s => s.setSettings)
   const setAllTargetStatuses = useTargetStatusStore(s => s.setAll)
+  const setGateways = useGatewaysStore(s => s.setGateways)
 
   const syncing       = useRef(false)
   const pollTimer     = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -66,6 +68,7 @@ function RootLayout() {
   useEffect(() => {
     syncAll()
     window.api.getSettings().then(setSettings)
+    window.api.getGateways().then(setGateways)
 
     // IPC events from main process — immediate dot refresh on any state change
     const cleanupStatus = window.api.onStatusUpdate((data: unknown) => {
@@ -118,9 +121,10 @@ function RootLayout() {
   // ── Nav ─────────────────────────────────────────────────────────────────────
 
   const navItems = [
-    { to: '/',         icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/add-rule', icon: PlusCircle,      label: 'Add Rule'  },
-    { to: '/settings', icon: Settings,        label: 'Settings'  }
+    { to: '/',          icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/add-rule',  icon: PlusCircle,      label: 'Add Rule'  },
+    { to: '/gateways',  icon: ShieldCheck,     label: 'Gateways'  },
+    { to: '/settings',  icon: Settings,        label: 'Settings'  }
   ]
 
   return (

@@ -2,9 +2,10 @@ import { createRouter, RouterProvider } from '@tanstack/react-router'
 import { rootRoute } from './routes/__root'
 import { indexRoute } from './routes/index'
 import { addRuleRoute } from './routes/add-rule'
+import { gatewaysRoute } from './routes/gateways'
 import { settingsRoute } from './routes/settings'
 
-const routeTree = rootRoute.addChildren([indexRoute, addRuleRoute, settingsRoute])
+const routeTree = rootRoute.addChildren([indexRoute, addRuleRoute, gatewaysRoute, settingsRoute])
 
 const router = createRouter({ routeTree })
 
