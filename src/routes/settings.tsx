@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { AppSettings } from '../../types'
+import { PremiumGate } from '@/components/PremiumGate'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -559,81 +560,81 @@ function Settings() {
                   </SelectContent>
                 </Select>
               </SettingRow>
+
+              <SettingRow
+                label="Launch at startup"
+                description="Start DeepOcean when you log in (required for scheduled blocks)"
+              >
+                <Switch
+                  checked={settings.launchAtStartup}
+                  onCheckedChange={v => save({ launchAtStartup: v })}
+                />
+              </SettingRow>
             </div>
 
             <Separator />
 
-            {/* ── Protected section (bottom of page) ── */}
-            <div className={cn(
-              'rounded-lg border p-4 space-y-1 transition-colors',
-              sectionLocked
-                ? 'border-amber-500/30 bg-amber-500/5'
-                : gatewayDef
-                  ? 'border-purple-500/30 bg-purple-500/5'
-                  : 'border-border bg-muted/10'
-            )}>
-              {/* Section header */}
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  {sectionLocked
-                    ? <Lock className="h-3.5 w-3.5 text-amber-400 flex-shrink-0" />
-                    : <ShieldCheck className={cn(
-                        'h-3.5 w-3.5 flex-shrink-0',
-                        gatewayDef ? 'text-purple-400' : 'text-muted-foreground/50'
-                      )} />
-                  }
-                  <div className="min-w-0">
-                    <span className={cn(
-                      'text-xs font-semibold tracking-wide uppercase',
-                      sectionLocked ? 'text-amber-300' : 'text-muted-foreground'
-                    )}>
-                      Protected settings
-                    </span>
-                    {sectionLocked && (
-                      <span className="text-xs text-amber-400/70 ml-1.5 normal-case font-normal">
-                        · locked by {gatewayDef?.name}
+            {/* ── Protected section — Premium only ── */}
+            <PremiumGate feature="Anti-bypass security settings">
+              <div className={cn(
+                'rounded-lg border p-4 space-y-1 transition-colors',
+                sectionLocked
+                  ? 'border-amber-500/30 bg-amber-500/5'
+                  : gatewayDef
+                    ? 'border-purple-500/30 bg-purple-500/5'
+                    : 'border-border bg-muted/10'
+              )}>
+                {/* Section header */}
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    {sectionLocked
+                      ? <Lock className="h-3.5 w-3.5 text-amber-400 flex-shrink-0" />
+                      : <ShieldCheck className={cn(
+                          'h-3.5 w-3.5 flex-shrink-0',
+                          gatewayDef ? 'text-purple-400' : 'text-muted-foreground/50'
+                        )} />
+                    }
+                    <div className="min-w-0">
+                      <span className={cn(
+                        'text-xs font-semibold tracking-wide uppercase',
+                        sectionLocked ? 'text-amber-300' : 'text-muted-foreground'
+                      )}>
+                        Protected settings
                       </span>
-                    )}
-                    {!sectionLocked && gatewayDef && (
-                      <span className="text-xs text-purple-400/60 ml-1.5 normal-case font-normal">
-                        · unlocked
-                      </span>
-                    )}
-                    {!gatewayDef && (
-                      <span className="text-xs text-muted-foreground/50 ml-1.5 normal-case font-normal">
-                        · click Lock to protect
-                      </span>
-                    )}
+                      {sectionLocked && (
+                        <span className="text-xs text-amber-400/70 ml-1.5 normal-case font-normal">
+                          · locked by {gatewayDef?.name}
+                        </span>
+                      )}
+                      {!sectionLocked && gatewayDef && (
+                        <span className="text-xs text-purple-400/60 ml-1.5 normal-case font-normal">
+                          · unlocked
+                        </span>
+                      )}
+                      {!gatewayDef && (
+                        <span className="text-xs text-muted-foreground/50 ml-1.5 normal-case font-normal">
+                          · click Lock to protect
+                        </span>
+                      )}
+                    </div>
                   </div>
+
+                  {/* The single control: LockButton owns all gateway assignment logic */}
+                  <LockButton
+                    sectionLocked={sectionLocked}
+                    gatewayDef={gatewayDef}
+                    onLockWith={handleLockWith}
+                    onRemoveLock={handleRemoveLock}
+                    onUnlockRequest={() => setChallengeOpen(true)}
+                  />
                 </div>
 
-                {/* The single control: LockButton owns all gateway assignment logic */}
-                <LockButton
-                  sectionLocked={sectionLocked}
-                  gatewayDef={gatewayDef}
-                  onLockWith={handleLockWith}
-                  onRemoveLock={handleRemoveLock}
-                  onUnlockRequest={() => setChallengeOpen(true)}
-                />
+                {/* Protected settings content */}
+                <div className="divide-y divide-border/50">
+                  <ServerTimeRow disabled={sectionLocked} />
+                </div>
               </div>
-
-              {/* Protected settings content */}
-              <div className="divide-y divide-border/50">
-                <SettingRow
-                  label="Launch at startup"
-                  description="Start DeepOcean when you log in (required for scheduled blocks)"
-                  disabled={sectionLocked}
-                >
-                  <Switch
-                    checked={settings.launchAtStartup}
-                    onCheckedChange={v => save({ launchAtStartup: v })}
-                    disabled={sectionLocked}
-                  />
-                </SettingRow>
-
-                <ServerTimeRow disabled={sectionLocked} />
-              </div>
-            </div>
+            </PremiumGate>
 
           </div>
         </div>

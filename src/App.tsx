@@ -4,8 +4,9 @@ import { indexRoute } from './routes/index'
 import { addRuleRoute } from './routes/add-rule'
 import { gatewaysRoute } from './routes/gateways'
 import { settingsRoute } from './routes/settings'
+import { loginRoute } from './routes/login'
 
-const routeTree = rootRoute.addChildren([indexRoute, addRuleRoute, gatewaysRoute, settingsRoute])
+const routeTree = rootRoute.addChildren([indexRoute, addRuleRoute, gatewaysRoute, settingsRoute, loginRoute])
 
 // Hash history is required for Electron production builds: the renderer loads
 // from a file:// URL whose pathname is the full filesystem path, which never

@@ -14,6 +14,17 @@ import { enableAutoLaunch, disableAutoLaunch } from './autoLaunch'
 
 const log = createLogger('Main')
 
+// ── Single-instance lock ────────────────────────────────────────────────────
+// Must run before app.whenReady(). A second instance launched by the OS
+// (e.g. when the deepocean:// deep-link fires) is absorbed here: we forward
+// the URL to the renderer of the already-running instance and quit the newcomer.
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+  log.warn('Another instance is already running — quitting')
+  app.exit(0)
+}
+
 let mainWin: BrowserWindow | null = null
 
 function getMainWin(): BrowserWindow | null {
@@ -169,11 +180,49 @@ function createWindow(): BrowserWindow {
 
 // ─── App lifecycle ──────────────────────────────────────────────────────────────
 
+// ── Deep-link helper ────────────────────────────────────────────────────────
+
+function handleDeepLink(url: string): void {
+  log.info(`Deep link received: ${url}`)
+  const win = getMainWin()
+  if (win) {
+    win.webContents.send('auth:deep-link', url)
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  }
+}
+
+// ── App lifecycle ───────────────────────────────────────────────────────────
+
 app.whenReady().then(async () => {
   log.info('App ready — starting DeepOcean')
   migrateRules()
   mainWin = createWindow()
   createTray(mainWin)
+
+  // Register deepocean:// as a custom URL scheme so the OS hands auth
+  // callbacks back to this app after the browser OAuth flow completes.
+  app.setAsDefaultProtocolClient('deepocean')
+  log.info('Registered deepocean:// protocol handler')
+
+  // Handle deep-link when app was already running (second-instance event)
+  app.on('second-instance', (_event, argv) => {
+    const url = argv.find(a => a.startsWith('deepocean://'))
+    if (url) handleDeepLink(url)
+    else {
+      // Just bring window to front (e.g. user clicked the taskbar icon again)
+      const win = getMainWin()
+      if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus() }
+    }
+  })
+
+  // Handle deep-link when app was NOT running (started by the OS from URL)
+  const startupDeepLink = process.argv.find(a => a.startsWith('deepocean://'))
+  if (startupDeepLink) {
+    log.info(`App started via deep link: ${startupDeepLink}`)
+    mainWin.webContents.once('did-finish-load', () => handleDeepLink(startupDeepLink))
+  }
 
   const settings = store.get('settings')
   log.info(
@@ -460,6 +509,11 @@ ipcMain.handle('settings:update', (_e, patch: Partial<AppSettings>) => {
 ipcMain.handle('shell:open-path', (_e, filePath: string) => {
   log.info(`IPC shell:open-path — "${filePath}"`)
   shell.openPath(filePath)
+})
+
+ipcMain.handle('shell:open-external', (_e, url: string) => {
+  log.info(`IPC shell:open-external — "${url}"`)
+  shell.openExternal(url)
 })
 
 // ─── IPC: Gateways ─────────────────────────────────────────────────────────────

@@ -7,6 +7,9 @@ import { useRulesStore } from '@/stores/rulesStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useTargetStatusStore } from '@/stores/targetStatusStore'
 import { useGatewaysStore } from '@/stores/gatewaysStore'
+import { supabase, fetchIsPremium } from '@/lib/supabase'
+import { useAuthStore } from '@/stores/authStore'
+import { AccountSection } from '@/components/AccountSection'
 
 // Safety-net poll — only runs while the window is visible.
 // Real-time updates come from IPC status-update events (see onStatusUpdate below).
@@ -17,6 +20,7 @@ function RootLayout() {
   const setSettings = useSettingsStore(s => s.setSettings)
   const setAllTargetStatuses = useTargetStatusStore(s => s.setAll)
   const setGateways = useGatewaysStore(s => s.setGateways)
+  const { setSession, setIsPremium, setLoaded, clear } = useAuthStore()
 
   const syncing       = useRef(false)
   const pollTimer     = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -62,6 +66,53 @@ function RootLayout() {
       pollTimer.current = null
     }
   }
+
+  // ── Auth bootstrap ──────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    // 1. Restore any existing session from localStorage
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (data.session) {
+        setSession(data.session)
+        const premium = await fetchIsPremium(data.session.user.id)
+        setIsPremium(premium)
+      }
+      setLoaded(true)
+    })
+
+    // 2. Keep store in sync whenever Supabase auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session) {
+        setSession(session)
+        const premium = await fetchIsPremium(session.user.id)
+        setIsPremium(premium)
+      } else {
+        clear()
+      }
+    })
+
+    // 3. Handle deepocean://auth/callback forwarded from main process
+    //    The deep link URL carries the PKCE code; exchangeCodeForSession resolves it.
+    const cleanupDeepLink = window.api.onDeepLink(async (url: string) => {
+      console.info('[Auth] Deep link received:', url)
+      const { data, error } = await supabase.auth.exchangeCodeForSession(url)
+      if (error) {
+        console.error('[Auth] exchangeCodeForSession failed:', error.message)
+        return
+      }
+      if (data.session) {
+        setSession(data.session)
+        const premium = await fetchIsPremium(data.session.user.id)
+        setIsPremium(premium)
+      }
+    })
+
+    return () => {
+      subscription.unsubscribe()
+      cleanupDeepLink()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Boot & event wiring ─────────────────────────────────────────────────────
 
@@ -152,8 +203,11 @@ function RootLayout() {
           ))}
         </nav>
 
-        <div className="px-3 py-4 border-t border-border">
-          <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+        {/* Account section */}
+        <AccountSection />
+
+        <div className="px-3 pb-3">
+          <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground/50">
             <Shield className="h-3 w-3" />
             <span>DeepOcean v1.2.0</span>
           </div>

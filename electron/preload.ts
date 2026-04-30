@@ -48,7 +48,15 @@ const api = {
   getTimeStatus:  (): Promise<{ offsetMs: number; lastSynced: string | null; timezone: string }>                              => ipcRenderer.invoke('system:time-status'),
 
   // Utilities
-  openPath: (p: string): Promise<void> => ipcRenderer.invoke('shell:open-path', p)
+  openPath:     (p: string):   Promise<void> => ipcRenderer.invoke('shell:open-path', p),
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:open-external', url),
+
+  // Auth — deep-link callback forwarded from main process after browser OAuth
+  onDeepLink: (cb: (url: string) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, url: string) => cb(url)
+    ipcRenderer.on('auth:deep-link', listener)
+    return () => ipcRenderer.removeListener('auth:deep-link', listener)
+  }
 }
 
 contextBridge.exposeInMainWorld('api', api)
