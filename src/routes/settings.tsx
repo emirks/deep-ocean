@@ -23,14 +23,15 @@ import type { AppSettings } from '../../types'
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 function fmtOffset(ms: number): string {
-  const abs = Math.abs(ms)
-  if (abs < 1000) return `${ms >= 0 ? '+' : ''}${ms}ms`
-  return `${ms >= 0 ? '+' : ''}${(ms / 1000).toFixed(1)}s`
+  const sign = ms >= 0 ? '+' : ''
+  const abs  = Math.abs(ms)
+  if (abs < 1000) return `${sign}${ms}ms`
+  return `${sign}${(ms / 1000).toFixed(1)}s`
 }
 
 function fmtAgo(isoStr: string): string {
   const secs = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000)
-  if (secs < 60)  return `${secs}s ago`
+  if (secs < 60)   return `${secs}s ago`
   if (secs < 3600) return `${Math.floor(secs / 60)}m ago`
   return `${Math.floor(secs / 3600)}h ago`
 }
@@ -64,35 +65,43 @@ function SettingRow({
 // ── ServerTimeRow ─────────────────────────────────────────────────────────────
 
 function ServerTimeRow({ disabled }: { disabled: boolean }) {
-  const settings = useSettingsStore()
-  const { update } = settings
+  const { useServerTime, update } = useSettingsStore()
 
   const [syncing,    setSyncing]    = useState(false)
   const [syncResult, setSyncResult] = useState<{
-    serverTime: string; offsetMs: number; error?: string
+    serverTime: string; offsetMs: number; source?: string; error?: string
   } | null>(null)
   const [lastSynced, setLastSynced] = useState<string | null>(null)
 
-  // Load cached status on mount
+  // Load cached status on mount to show last-synced time
   useEffect(() => {
-    window.api.getTimeStatus().then(s => {
-      if (s.lastSynced) setLastSynced(s.lastSynced)
-    }).catch(() => {})
+    window.api.getTimeStatus()
+      .then(s => {
+        if (s.lastSynced) {
+          setLastSynced(s.lastSynced)
+          console.debug('[Settings] Loaded cached time status — last synced:', s.lastSynced, 'offset:', s.offsetMs, 'ms')
+        }
+      })
+      .catch(e => console.warn('[Settings] getTimeStatus failed:', e))
   }, [])
 
   const save = async (patch: Partial<AppSettings>) => {
     update(patch)
     await window.api.updateSettings(patch)
+    console.info('[Settings] Saved:', patch)
   }
 
   const syncNow = async () => {
+    console.info('[Settings] Manual server time sync requested')
     setSyncing(true)
     setSyncResult(null)
     try {
       const res = await window.api.getServerTime()
-      setSyncResult({ serverTime: res.serverTime, offsetMs: res.offsetMs })
+      console.info('[Settings] Time sync result:', res)
+      setSyncResult({ serverTime: res.serverTime, offsetMs: res.offsetMs, source: (res as any).source })
       setLastSynced(new Date().toISOString())
     } catch (e: any) {
+      console.error('[Settings] Time sync error:', e)
       setSyncResult({ serverTime: '', offsetMs: 0, error: e?.message ?? 'Network error' })
     } finally {
       setSyncing(false)
@@ -107,85 +116,84 @@ function ServerTimeRow({ disabled }: { disabled: boolean }) {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium">Use server time for schedules</p>
           <p className="text-xs text-muted-foreground mt-0.5">
-            When on, schedule lock/unlock times are checked against a reliable server clock
-            (via google.com) — prevents bypassing locks by rolling back the system clock.
+            Schedule lock/unlock times are checked against a reliable server clock
+            (timeapi.io, fallback: google.com). Prevents bypassing locks by rolling
+            back the system clock. Time is synced at startup and every 30 min.
           </p>
         </div>
         <Switch
-          checked={settings.useServerTime}
+          checked={useServerTime}
           onCheckedChange={v => save({ useServerTime: v })}
           disabled={disabled}
         />
       </div>
 
-      {settings.useServerTime && (
-        <div className="pl-0 space-y-2">
-          {/* Last synced status */}
-          <div className="flex items-center gap-3">
-            <div className="flex-1 min-w-0">
-              {lastSynced && !syncResult && (
-                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                  <Clock className="h-3 w-3" />
-                  Last synced {fmtAgo(lastSynced)}
-                </p>
-              )}
-              {syncResult && !syncResult.error && (
-                <p className={cn(
-                  'text-xs flex items-center gap-1.5',
-                  hasDrift ? 'text-amber-400' : 'text-emerald-400'
-                )}>
-                  {hasDrift
-                    ? <AlertCircle className="h-3.5 w-3.5" />
-                    : <CheckCircle2 className="h-3.5 w-3.5" />
-                  }
-                  {hasDrift
-                    ? `Clock drift: ${fmtOffset(syncResult.offsetMs)}`
-                    : `Synced — offset ${fmtOffset(syncResult.offsetMs)}`
-                  }
-                  &nbsp;·&nbsp;
-                  Server: {new Date(syncResult.serverTime).toLocaleTimeString()}
-                </p>
-              )}
-              {syncResult?.error && (
-                <p className="text-xs text-red-400 flex items-center gap-1.5">
-                  <AlertCircle className="h-3.5 w-3.5" />
-                  Sync failed: {syncResult.error}
-                </p>
-              )}
-            </div>
-
-            <Button
-              variant="outline" size="sm"
-              onClick={syncNow}
-              disabled={syncing || disabled}
-              className={cn(
-                'h-7 text-xs',
-                syncResult && !syncResult.error && !hasDrift && 'border-emerald-500/40 text-emerald-400',
-                hasDrift && 'border-amber-500/40 text-amber-400',
-                syncResult?.error && 'border-red-500/40 text-red-400'
-              )}
-            >
-              {syncing
-                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                : <RefreshCw className="h-3.5 w-3.5" />
-              }
-              <span className="ml-1.5">{syncResult ? 'Resync' : 'Sync now'}</span>
-            </Button>
+      {useServerTime && (
+        <div className="flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            {!syncResult && lastSynced && (
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <Clock className="h-3 w-3" />
+                Last synced {fmtAgo(lastSynced)}
+              </p>
+            )}
+            {!syncResult && !lastSynced && (
+              <p className="text-xs text-muted-foreground">Not yet synced this session</p>
+            )}
+            {syncResult && !syncResult.error && (
+              <p className={cn(
+                'text-xs flex items-center gap-1.5',
+                hasDrift ? 'text-amber-400' : 'text-emerald-400'
+              )}>
+                {hasDrift
+                  ? <AlertCircle className="h-3.5 w-3.5" />
+                  : <CheckCircle2 className="h-3.5 w-3.5" />
+                }
+                {hasDrift
+                  ? `Clock drift detected: ${fmtOffset(syncResult.offsetMs)}`
+                  : `Accurate — offset ${fmtOffset(syncResult.offsetMs)}`
+                }
+                {' · '}{new Date(syncResult.serverTime).toLocaleTimeString()}
+                {syncResult.source && (
+                  <span className="text-muted-foreground/60"> via {syncResult.source}</span>
+                )}
+              </p>
+            )}
+            {syncResult?.error && (
+              <p className="text-xs text-red-400 flex items-center gap-1.5">
+                <AlertCircle className="h-3.5 w-3.5" />
+                Sync failed: {syncResult.error}
+              </p>
+            )}
           </div>
+
+          <Button
+            variant="outline" size="sm"
+            onClick={syncNow}
+            disabled={syncing || disabled}
+            className={cn(
+              'h-7 text-xs flex-shrink-0',
+              syncResult && !syncResult.error && !hasDrift && 'border-emerald-500/40 text-emerald-400',
+              hasDrift && 'border-amber-500/40 text-amber-400',
+              syncResult?.error && 'border-red-500/40 text-red-400'
+            )}
+          >
+            {syncing
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <RefreshCw className="h-3.5 w-3.5" />
+            }
+            <span className="ml-1.5">{syncResult ? 'Resync' : 'Sync now'}</span>
+          </Button>
         </div>
       )}
     </div>
   )
 }
 
-// ── GatewayDialog (inline challenge) ─────────────────────────────────────────
+// ── GatewayDialog ─────────────────────────────────────────────────────────────
 
 function GatewayDialog({
-  open,
-  onOpenChange,
-  phrase,
-  gatewayName,
-  onPass
+  open, onOpenChange, phrase, gatewayName, onPass
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -198,10 +206,12 @@ function GatewayDialog({
 
   const confirm = () => {
     if (input !== phrase) {
+      console.warn('[Settings] Gateway phrase mismatch')
       setError('Phrase does not match. Try again.')
       setInput('')
       return
     }
+    console.info('[Settings] Gateway passed — unlocking protected section')
     setInput('')
     setError('')
     onOpenChange(false)
@@ -225,7 +235,8 @@ function GatewayDialog({
 
         <div className="space-y-4 py-2">
           <p className="text-sm text-muted-foreground">
-            Pass the <strong className="text-foreground">{gatewayName}</strong> gateway to edit these settings.
+            Pass the <strong className="text-foreground">{gatewayName}</strong> gateway
+            to edit the protected settings.
           </p>
           <div className="rounded-md border border-purple-500/20 bg-purple-500/5 px-4 py-3">
             <p className="text-sm font-medium text-purple-200 leading-relaxed">"{phrase}"</p>
@@ -256,43 +267,55 @@ function GatewayDialog({
 // ── Settings page ─────────────────────────────────────────────────────────────
 
 function Settings() {
-  const settings  = useSettingsStore()
-  const { update } = settings
-  const gateways  = useGatewaysStore(s => s.gateways)
+  const settings   = useSettingsStore()
+  const { update, settingsUnlocked, setUnlocked } = settings
+  const gateways   = useGatewaysStore(s => s.gateways)
 
   const gatewayDef = settings.settingsGatewayId
     ? gateways.find(g => g.id === settings.settingsGatewayId) ?? null
     : null
 
-  // The protected section starts locked if a gateway is assigned.
-  // Once unlocked for this visit, stays unlocked until the user manually re-locks or navigates away.
-  const [sectionLocked,   setSectionLocked]   = useState(!!gatewayDef)
-  const [challengeOpen,   setChallengeOpen]   = useState(false)
+  // sectionLocked: true when a gateway is set AND the user hasn't unlocked yet
+  // Uses store-level settingsUnlocked so state survives route navigation
+  const sectionLocked = !!gatewayDef && !settingsUnlocked
 
-  // If the gateway is removed externally, auto-unlock the section
-  useEffect(() => {
-    if (!gatewayDef) setSectionLocked(false)
-  }, [gatewayDef])
+  const [challengeOpen, setChallengeOpen] = useState(false)
 
-  // If a new gateway is assigned while settings is open, re-lock the section
+  // Auto-unlock if the gateway is removed while the section is locked
   useEffect(() => {
-    if (gatewayDef) setSectionLocked(true)
-  }, [settings.settingsGatewayId])
+    if (!gatewayDef && !settingsUnlocked) {
+      console.debug('[Settings] Gateway removed — auto-unlocking protected section')
+      setUnlocked(true)
+    }
+  }, [gatewayDef, settingsUnlocked, setUnlocked])
+
+  // Re-lock when a new gateway is assigned (e.g. someone else changes it)
+  useEffect(() => {
+    if (gatewayDef) {
+      console.debug('[Settings] Gateway assigned/changed — re-locking protected section')
+      setUnlocked(false)
+    }
+  }, [settings.settingsGatewayId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async (patch: Partial<AppSettings>) => {
     update(patch)
     await window.api.updateSettings(patch)
+    console.info('[Settings] Saved:', patch)
   }
 
   const handleLockClick = () => {
     if (sectionLocked) {
-      // Need to pass gateway to unlock
+      // Locked → open gateway challenge to unlock
+      console.debug('[Settings] Unlock requested — opening gateway challenge')
       setChallengeOpen(true)
     } else {
-      // Re-lock the section
-      setSectionLocked(true)
+      // Unlocked → re-lock manually
+      console.info('[Settings] Manually re-locking protected section')
+      setUnlocked(false)
     }
   }
+
+  console.debug('[Settings] Render — sectionLocked:', sectionLocked, 'gatewayDef:', gatewayDef?.name ?? 'none')
 
   return (
     <>
@@ -305,75 +328,7 @@ function Settings() {
         <div className="flex-1 overflow-auto px-6 py-5">
           <div className="max-w-lg space-y-5">
 
-            {/* ── Protected section ─────────────────────────────────────────── */}
-            <div className={cn(
-              'rounded-lg border p-4 space-y-1 transition-colors',
-              gatewayDef && sectionLocked
-                ? 'border-amber-500/30 bg-amber-500/5'
-                : gatewayDef
-                  ? 'border-purple-500/30 bg-purple-500/5'
-                  : 'border-border bg-muted/10'
-            )}>
-              {/* Section header */}
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2">
-                  {gatewayDef && sectionLocked
-                    ? <Lock className="h-3.5 w-3.5 text-amber-400" />
-                    : <ShieldCheck className={cn('h-3.5 w-3.5', gatewayDef ? 'text-purple-400' : 'text-muted-foreground/60')} />
-                  }
-                  <span className={cn(
-                    'text-xs font-semibold tracking-wide uppercase',
-                    gatewayDef && sectionLocked ? 'text-amber-300' : 'text-muted-foreground'
-                  )}>
-                    Protected settings
-                  </span>
-                  {gatewayDef && sectionLocked && (
-                    <span className="text-xs text-amber-400/70">· {gatewayDef.name}</span>
-                  )}
-                </div>
-
-                {/* Lock / unlock button */}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleLockClick}
-                  className={cn(
-                    'h-7 px-2 text-xs gap-1.5',
-                    gatewayDef && sectionLocked
-                      ? 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/10'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  {gatewayDef && sectionLocked
-                    ? <><Unlock className="h-3.5 w-3.5" /> Unlock</>
-                    : gatewayDef
-                      ? <><Lock className="h-3.5 w-3.5" /> Lock</>
-                      : null
-                  }
-                </Button>
-              </div>
-
-              {/* Locked content */}
-              <div className="divide-y divide-border/50">
-                <SettingRow
-                  label="Launch at startup"
-                  description="Start DeepOcean when you log in (required for scheduled blocks)"
-                  disabled={!!(gatewayDef && sectionLocked)}
-                >
-                  <Switch
-                    checked={settings.launchAtStartup}
-                    onCheckedChange={v => save({ launchAtStartup: v })}
-                    disabled={!!(gatewayDef && sectionLocked)}
-                  />
-                </SettingRow>
-
-                <ServerTimeRow disabled={!!(gatewayDef && sectionLocked)} />
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* ── General settings ──────────────────────────────────────────── */}
+            {/* ── General settings (always accessible) ───────────────────── */}
             <div className="divide-y divide-border">
               <SettingRow
                 label="Notifications"
@@ -428,14 +383,18 @@ function Settings() {
 
             <Separator />
 
-            {/* ── Protected-section gateway selector ────────────────────────── */}
+            {/* ── Gateway selector (always accessible) ────────────────────── */}
             <SettingRow
               label="Lock protected settings with gateway"
-              description="Choose a gateway to protect the section above. When set, a phrase must be typed before those settings can be changed."
+              description="Choose a gateway to protect the section below. When set, a phrase must be typed before those settings can be changed."
             >
               <Select
                 value={settings.settingsGatewayId ?? '__none__'}
-                onValueChange={v => save({ settingsGatewayId: v === '__none__' ? null : v })}
+                onValueChange={v => {
+                  const newId = v === '__none__' ? null : v
+                  console.info('[Settings] settingsGatewayId →', newId)
+                  save({ settingsGatewayId: newId })
+                }}
               >
                 <SelectTrigger className="w-44">
                   <SelectValue placeholder="No lock" />
@@ -454,6 +413,77 @@ function Settings() {
               </Select>
             </SettingRow>
 
+            <Separator />
+
+            {/* ── Protected section (bottom of page) ──────────────────────── */}
+            <div className={cn(
+              'rounded-lg border p-4 space-y-1 transition-colors',
+              sectionLocked
+                ? 'border-amber-500/30 bg-amber-500/5'
+                : gatewayDef
+                  ? 'border-purple-500/30 bg-purple-500/5'
+                  : 'border-border bg-muted/10'
+            )}>
+              {/* Section header row */}
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  {sectionLocked
+                    ? <Lock className="h-3.5 w-3.5 text-amber-400" />
+                    : <ShieldCheck className={cn('h-3.5 w-3.5', gatewayDef ? 'text-purple-400' : 'text-muted-foreground/50')} />
+                  }
+                  <span className={cn(
+                    'text-xs font-semibold tracking-wide uppercase',
+                    sectionLocked ? 'text-amber-300' : 'text-muted-foreground'
+                  )}>
+                    Protected settings
+                  </span>
+                  {sectionLocked && (
+                    <span className="text-xs text-amber-400/70">· {gatewayDef?.name}</span>
+                  )}
+                  {!sectionLocked && gatewayDef && (
+                    <span className="text-xs text-purple-400/70">· unlocked</span>
+                  )}
+                </div>
+
+                {/* Lock / Unlock button — only shown when a gateway is configured */}
+                {gatewayDef && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleLockClick}
+                    className={cn(
+                      'h-7 px-2 text-xs gap-1.5',
+                      sectionLocked
+                        ? 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/10'
+                        : 'text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    {sectionLocked
+                      ? <><Unlock className="h-3.5 w-3.5" /> Unlock</>
+                      : <><Lock   className="h-3.5 w-3.5" /> Lock</>
+                    }
+                  </Button>
+                )}
+              </div>
+
+              {/* Settings inside the protected box */}
+              <div className="divide-y divide-border/50">
+                <SettingRow
+                  label="Launch at startup"
+                  description="Start DeepOcean when you log in (required for scheduled blocks to work)"
+                  disabled={sectionLocked}
+                >
+                  <Switch
+                    checked={settings.launchAtStartup}
+                    onCheckedChange={v => save({ launchAtStartup: v })}
+                    disabled={sectionLocked}
+                  />
+                </SettingRow>
+
+                <ServerTimeRow disabled={sectionLocked} />
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
@@ -465,7 +495,10 @@ function Settings() {
           onOpenChange={setChallengeOpen}
           phrase={gatewayDef.phrase}
           gatewayName={gatewayDef.name}
-          onPass={() => setSectionLocked(false)}
+          onPass={() => {
+            setUnlocked(true)
+            console.info('[Settings] Protected section unlocked for this session')
+          }}
         />
       )}
     </>
