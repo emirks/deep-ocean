@@ -168,19 +168,46 @@ function createWindow(): BrowserWindow {
 
 // ─── App lifecycle ──────────────────────────────────────────────────────────────
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   log.info('App ready — starting DeepOcean')
   migrateRules()
   mainWin = createWindow()
   createTray(mainWin)
-  initScheduler()
-  startProcessMonitor()
 
   const settings = store.get('settings')
-  log.info(`Settings loaded — launchAtStartup=${settings.launchAtStartup} notifications=${settings.notifications} preNotificationMinutes=${settings.preNotificationMinutes} theme=${settings.theme} useServerTime=${settings.useServerTime}`)
+  log.info(
+    `Settings loaded — launchAtStartup=${settings.launchAtStartup} ` +
+    `notifications=${settings.notifications} ` +
+    `preNotificationMinutes=${settings.preNotificationMinutes} ` +
+    `theme=${settings.theme} useServerTime=${settings.useServerTime}`
+  )
+
   if (settings.launchAtStartup) {
     app.setLoginItemSettings({ openAtLogin: true })
   }
+
+  // ── Server time sync BEFORE scheduler ─────────────────────────────────────
+  // Must complete before initScheduler so startup reconciliation (isWithinSchedule)
+  // uses the correct adjusted time. If sync fails we fall back silently to local time.
+  if (settings.useServerTime) {
+    log.info('useServerTime=true — syncing clock before scheduler start…')
+    try {
+      const syncResult = await fetchAndCacheOffset()
+      log.info(
+        `Pre-scheduler sync complete — offset=${syncResult.offsetMs}ms ` +
+        `via ${syncResult.source} — schedules will use server time`
+      )
+    } catch (e) {
+      log.warn(`Pre-scheduler sync failed: ${(e as Error).message} — falling back to local time for startup reconciliation`)
+    }
+  } else {
+    log.info('useServerTime=false — using local time for schedules (offset=0)')
+  }
+
+  initScheduler()
+  startProcessMonitor()
+
+  // Start background 30-min re-sync interval (initial sync already done above)
   if (settings.useServerTime) {
     startPeriodicSync()
   }
@@ -406,12 +433,19 @@ ipcMain.handle('settings:update', (_e, patch: Partial<AppSettings>) => {
   }
   if ('useServerTime' in patch) {
     if (updated.useServerTime) {
-      log.info('  useServerTime → true — starting periodic sync')
+      log.info('  useServerTime → true — immediate sync + starting 30-min interval')
+      // Kick off initial sync asynchronously — don't block the IPC response
+      fetchAndCacheOffset()
+        .then(r => log.info(`  useServerTime initial sync complete — offset=${r.offsetMs}ms via ${r.source}`))
+        .catch(e => log.warn(`  useServerTime initial sync failed: ${(e as Error).message}`))
       startPeriodicSync()
     } else {
-      log.info('  useServerTime → false — stopping sync')
+      log.info('  useServerTime → false — stopping sync, offset reset to 0')
       stopPeriodicSync()
     }
+  }
+  if ('settingsGatewayId' in patch) {
+    log.info(`  settingsGatewayId → ${updated.settingsGatewayId ?? 'null (no lock)'}`)
   }
 })
 
