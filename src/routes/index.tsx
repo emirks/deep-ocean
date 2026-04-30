@@ -3,35 +3,11 @@ import { rootRoute } from './__root'
 import { useRulesStore } from '@/stores/rulesStore'
 import { RuleCard } from '@/components/RuleCard'
 import { Button } from '@/components/ui/button'
-import { PlusCircle, Power, Waves } from 'lucide-react'
-import { useState } from 'react'
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
-} from '@/components/ui/dialog'
+import { PlusCircle, Waves } from 'lucide-react'
 
 function Dashboard() {
   const rules = useRulesStore(s => s.rules)
-  const setRules = useRulesStore(s => s.setRules)
-  const setEnabled = useRulesStore(s => s.setEnabled)
   const navigate = useNavigate()
-  const [disableAllOpen, setDisableAllOpen] = useState(false)
-  const [disabling, setDisabling] = useState(false)
-
-  const handleDisableAll = async () => {
-    const toDisable = useRulesStore.getState().rules.filter(r => r.enabled)
-    setDisabling(true)
-    try {
-      for (const r of toDisable) {
-        setEnabled(r.id, false)
-        await window.api.disableRule(r.id)
-      }
-      const synced = await window.api.syncRules()
-      setRules(synced)
-      setDisableAllOpen(false)
-    } finally {
-      setDisabling(false)
-    }
-  }
 
   return (
     <div className="flex flex-col h-full">
@@ -43,18 +19,10 @@ function Dashboard() {
             {rules.filter(r => r.enabled).length} active · {rules.length} total rules
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {rules.some(r => r.enabled) && (
-            <Button variant="outline" size="sm" onClick={() => setDisableAllOpen(true)}>
-              <Power className="h-4 w-4 mr-1.5" />
-              Disable all
-            </Button>
-          )}
-          <Button size="sm" onClick={() => navigate({ to: '/add-rule' })}>
-            <PlusCircle className="h-4 w-4 mr-1.5" />
-            Add Rule
-          </Button>
-        </div>
+        <Button size="sm" onClick={() => navigate({ to: '/add-rule' })}>
+          <PlusCircle className="h-4 w-4 mr-1.5" />
+          Add Rule
+        </Button>
       </header>
 
       {/* Content */}
@@ -83,25 +51,6 @@ function Dashboard() {
           </div>
         )}
       </div>
-
-      <Dialog open={disableAllOpen} onOpenChange={setDisableAllOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Disable all rules</DialogTitle>
-            <DialogDescription>
-              Every active rule will be turned off and its OS locks removed. You can enable rules again from each card.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDisableAllOpen(false)} disabled={disabling}>
-              Cancel
-            </Button>
-            <Button onClick={handleDisableAll} disabled={disabling}>
-              {disabling ? 'Disabling…' : 'Disable all'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }
