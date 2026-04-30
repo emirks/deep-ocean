@@ -2,12 +2,14 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { X, Plus } from 'lucide-react'
+import { X, Plus, Lock } from 'lucide-react'
 import type { WebsiteConfig } from '../../../types'
 
 interface Props {
   config: WebsiteConfig
   onChange: (config: WebsiteConfig) => void
+  /** Domains that existed when the rule was loaded in edit mode — shown without a remove button. */
+  lockedDomains?: string[]
 }
 
 function normaliseDomain(raw: string): string {
@@ -17,7 +19,7 @@ function normaliseDomain(raw: string): string {
     .replace(/\/.*/, '')
 }
 
-export function WebsiteFields({ config, onChange }: Props) {
+export function WebsiteFields({ config, onChange, lockedDomains = [] }: Props) {
   const [input, setInput] = useState('')
 
   const add = () => {
@@ -31,6 +33,8 @@ export function WebsiteFields({ config, onChange }: Props) {
   const remove = (domain: string) => {
     onChange({ domains: config.domains.filter(d => d !== domain) })
   }
+
+  const isLocked = (domain: string) => lockedDomains.includes(domain)
 
   return (
     <div className="space-y-3">
@@ -55,10 +59,13 @@ export function WebsiteFields({ config, onChange }: Props) {
               key={d}
               className="inline-flex items-center gap-1 rounded-full bg-secondary text-secondary-foreground text-xs px-2.5 py-1"
             >
+              {isLocked(d) && <Lock className="h-2.5 w-2.5 text-muted-foreground/60" />}
               {d}
-              <button type="button" onClick={() => remove(d)}>
-                <X className="h-3 w-3" />
-              </button>
+              {!isLocked(d) && (
+                <button type="button" onClick={() => remove(d)}>
+                  <X className="h-3 w-3" />
+                </button>
+              )}
             </span>
           ))}
         </div>
