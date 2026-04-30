@@ -8,7 +8,7 @@
     "dev": "node node_modules/electron-vite/bin/electron-vite.js dev",
     "build": "node node_modules/electron-vite/bin/electron-vite.js build",
     "preview": "node node_modules/electron-vite/bin/electron-vite.js preview",
-    "package": "pnpm build; node node_modules/.bin/electron-builder"
+    "package": "pnpm build && pnpm exec electron-builder"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.4",
