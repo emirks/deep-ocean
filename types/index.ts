@@ -48,23 +48,19 @@ export type BlockerConfig = FolderConfig | AppConfig | WebsiteConfig
 
 // ─── Gateways ──────────────────────────────────────────────────────────────────
 //
-// A Gateway is a friction layer that must be cleared before a rule can be
-// manually unblocked. Scheduled unlocks bypass gateways (they are pre-committed).
+// A GatewayDef is a named, globally-defined friction layer.
+// Rules reference gateways by ID (gatewayIds[]). Settings use a single gateway
+// (settingsGatewayId). Scheduled unlocks always bypass gateways.
 //
-// Current building blocks:
-//   phrase  — type a specific text phrase
-//
-// Planned:
-//   timer   — must wait N minutes after requesting
-//   email   — confirm via email link
-//   telegram — confirm via Telegram bot message
+// Only phrase gateways are implemented; extend `phrase` → union type when more
+// variants (timer, email, Telegram) are added.
 
-export interface PhraseGateway {
-  type: 'phrase'
+export interface GatewayDef {
+  id: string
+  name: string
   phrase: string
+  createdAt: string
 }
-
-export type Gateway = PhraseGateway  // union-extend here as more are added
 
 // ─── Rule ──────────────────────────────────────────────────────────────────────
 
@@ -74,7 +70,8 @@ export interface Rule {
   label: string
   config: BlockerConfig
   schedules: Schedule[]
-  gateways: Gateway[]
+  /** IDs referencing globally-defined GatewayDef entries. All must pass before manual disable. */
+  gatewayIds: string[]
   /**
    * User's choice: is this rule armed?
    * When true the scheduler locks/unlocks according to the schedule.
@@ -99,4 +96,6 @@ export interface AppSettings {
   /** Minutes before a schedule lock to send a warning notification. 0 = disabled. */
   preNotificationMinutes: number
   theme: 'light' | 'dark' | 'system'
+  /** GatewayDef.id required to access Settings. null = no protection. */
+  settingsGatewayId: string | null
 }
