@@ -1,9 +1,9 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import path from 'node:path'
-import https from 'node:https'
 import { v4 as uuidv4 } from 'uuid'
 import type { Rule, RuleStatus, GatewayDef, AppSettings } from '../types'
 import { store } from './store'
+import { startPeriodicSync, stopPeriodicSync, fetchAndCacheOffset, getCachedOffsetMs, getLastSyncedAt } from './timeSync'
 import { BlockerEngine } from './blockers/BlockerEngine'
 import { initScheduler, reloadScheduler, isWithinSchedule } from './scheduler'
 import { startProcessMonitor } from './processMonitor'
@@ -79,11 +79,14 @@ function migrateRules(): void {
     log.info(`Migrated ${globalGateways.length} global gateway(s)`)
   }
 
-  // Ensure settingsGatewayId exists in settings
+  // Ensure new settings fields exist
   const settings = store.get('settings') as any
-  if (settings.settingsGatewayId === undefined) {
-    store.set('settings', { ...settings, settingsGatewayId: null })
-    log.info('Migrated settings — added settingsGatewayId field')
+  const settingsPatch: Record<string, unknown> = {}
+  if (settings.settingsGatewayId === undefined) settingsPatch.settingsGatewayId = null
+  if (settings.useServerTime     === undefined) settingsPatch.useServerTime     = false
+  if (Object.keys(settingsPatch).length > 0) {
+    store.set('settings', { ...settings, ...settingsPatch })
+    log.info(`Migrated settings — added fields: ${Object.keys(settingsPatch).join(', ')}`)
   }
 }
 
@@ -174,9 +177,12 @@ app.whenReady().then(() => {
   startProcessMonitor()
 
   const settings = store.get('settings')
-  log.info(`Settings loaded — launchAtStartup=${settings.launchAtStartup} notifications=${settings.notifications} preNotificationMinutes=${settings.preNotificationMinutes} theme=${settings.theme}`)
+  log.info(`Settings loaded — launchAtStartup=${settings.launchAtStartup} notifications=${settings.notifications} preNotificationMinutes=${settings.preNotificationMinutes} theme=${settings.theme} useServerTime=${settings.useServerTime}`)
   if (settings.launchAtStartup) {
     app.setLoginItemSettings({ openAtLogin: true })
+  }
+  if (settings.useServerTime) {
+    startPeriodicSync()
   }
 
   app.on('activate', () => {
@@ -398,6 +404,15 @@ ipcMain.handle('settings:update', (_e, patch: Partial<AppSettings>) => {
     log.info(`  preNotificationMinutes → ${updated.preNotificationMinutes} — reloading scheduler`)
     reloadScheduler()
   }
+  if ('useServerTime' in patch) {
+    if (updated.useServerTime) {
+      log.info('  useServerTime → true — starting periodic sync')
+      startPeriodicSync()
+    } else {
+      log.info('  useServerTime → false — stopping sync')
+      stopPeriodicSync()
+    }
+  }
 })
 
 ipcMain.handle('shell:open-path', (_e, filePath: string) => {
@@ -464,30 +479,18 @@ ipcMain.handle('gateways:remove', (_e, { id }: { id: string }) => {
 
 // ─── IPC: System ───────────────────────────────────────────────────────────────
 
+/** Fetch a fresh time reading, cache the offset, and return results + cached state. */
 ipcMain.handle('system:server-time', async () => {
-  log.debug('IPC system:server-time — fetching from worldtimeapi.org')
-  return new Promise<{ serverTime: string; localTime: string; offsetMs: number }>((resolve, reject) => {
-    const req = https.get('https://worldtimeapi.org/api/timezone/Etc/UTC', { timeout: 8000 }, (res) => {
-      let data = ''
-      res.on('data', (chunk: string) => { data += chunk })
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data)
-          const serverMs: number = json.unixtime * 1000
-          const localMs = Date.now()
-          log.info(`system:server-time — server=${new Date(serverMs).toISOString()} local=${new Date(localMs).toISOString()} offset=${serverMs - localMs}ms`)
-          resolve({
-            serverTime: new Date(serverMs).toISOString(),
-            localTime:  new Date(localMs).toISOString(),
-            offsetMs:   serverMs - localMs
-          })
-        } catch (e) {
-          log.error('system:server-time — parse error:', e)
-          reject(new Error('Failed to parse time response'))
-        }
-      })
-    })
-    req.on('error', (e) => { log.error('system:server-time — request error:', e); reject(e) })
-    req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')) })
-  })
+  log.debug('IPC system:server-time — fetching via google.com Date header')
+  const result = await fetchAndCacheOffset()
+  return result
+})
+
+/** Return the currently cached offset without a network round-trip. */
+ipcMain.handle('system:time-status', () => {
+  const lastSynced = getLastSyncedAt()
+  return {
+    offsetMs:   getCachedOffsetMs(),
+    lastSynced: lastSynced ? lastSynced.toISOString() : null
+  }
 })

@@ -5,6 +5,7 @@ import { BlockerEngine } from './blockers/BlockerEngine'
 import { store } from './store'
 import { notify } from './notifications'
 import { createLogger } from './logger'
+import { getAdjustedNow } from './timeSync'
 
 const log = createLogger('Scheduler')
 
@@ -36,9 +37,12 @@ function minutesBefore(time: string, minutes: number): string | null {
   return `${String(nh).padStart(2, '0')}:${String(nm).padStart(2, '0')}`
 }
 
-/** Exported so main.ts can use it for immediate enable/disable decisions. */
+/**
+ * Exported so main.ts can use it for immediate enable/disable decisions.
+ * Uses getAdjustedNow() which applies the server-time offset when useServerTime is on.
+ */
 export function isWithinSchedule(schedules: Schedule[]): boolean {
-  const now = new Date()
+  const now = getAdjustedNow()
   const day = now.getDay()
   const minutes = now.getHours() * 60 + now.getMinutes()
   return schedules.some(s => {
