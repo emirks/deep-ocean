@@ -151,6 +151,8 @@ export function RuleCard({ rule }: Props) {
     await doDisable()
   }
 
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+
   const handleRemove = async () => {
     await window.api.removeRule(rule.id)
     removeRule(rule.id)
@@ -278,7 +280,7 @@ export function RuleCard({ rule }: Props) {
                     variant="ghost" size="icon"
                     className="h-8 w-8 text-muted-foreground hover:text-destructive"
                     disabled={inTransit}
-                    onClick={handleRemove}
+                    onClick={() => setDeleteConfirmOpen(true)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
@@ -327,22 +329,23 @@ export function RuleCard({ rule }: Props) {
                     <p className="text-sm font-medium text-purple-200">{currentGateway.name}</p>
                   </div>
                   <div className="rounded-md border border-purple-500/20 bg-purple-500/5 px-4 py-3 select-none">
-                    <p className="text-sm font-medium text-purple-200 leading-relaxed" style={{ userSelect: 'none' }}>
-                      "{currentGateway.phrase}"
+                    <p className="text-sm font-medium text-purple-200 leading-relaxed whitespace-pre-wrap break-words" style={{ userSelect: 'none' }}>
+                      {currentGateway.phrase}
                     </p>
                   </div>
                 </>
               )}
 
               <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Type the phrase exactly</Label>
-                <Input
+                <Label className="text-xs text-muted-foreground">Type the phrase exactly · Ctrl+Enter to confirm</Label>
+                <textarea
                   autoFocus
                   value={phraseInput}
+                  rows={3}
                   onChange={e => { setPhraseInput(e.target.value); setGatewayError('') }}
-                  onKeyDown={e => e.key === 'Enter' && handleGatewayConfirm()}
+                  onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) handleGatewayConfirm() }}
                   onPaste={e => e.preventDefault()}
-                  className={gatewayError ? 'border-red-500' : ''}
+                  className={`w-full resize-none rounded-md border bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring whitespace-pre-wrap break-words ${gatewayError ? 'border-red-500' : 'border-input'}`}
                 />
                 {gatewayError && <p className="text-xs text-red-400">{gatewayError}</p>}
               </div>
@@ -352,6 +355,31 @@ export function RuleCard({ rule }: Props) {
               <Button variant="outline" onClick={() => setGatewayOpen(false)}>Cancel</Button>
               <Button onClick={handleGatewayConfirm}>
                 {gatewayIdx < ruleGateways.length - 1 ? 'Next →' : 'Confirm & Disable'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete confirmation */}
+        <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Trash2 className="h-4 w-4 text-destructive" />
+                Delete rule?
+              </DialogTitle>
+              <DialogDescription>
+                <span className="font-medium text-foreground">"{rule.label}"</span> will be permanently
+                deleted and any active OS blocks it holds will be removed. This cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
+              <Button
+                variant="destructive"
+                onClick={async () => { setDeleteConfirmOpen(false); await handleRemove() }}
+              >
+                Delete
               </Button>
             </DialogFooter>
           </DialogContent>
