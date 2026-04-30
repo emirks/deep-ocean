@@ -10,6 +10,7 @@ import { startProcessMonitor } from './processMonitor'
 import { createTray } from './tray'
 import { notify } from './notifications'
 import { createLogger } from './logger'
+import { enableAutoLaunch, disableAutoLaunch } from './autoLaunch'
 
 const log = createLogger('Main')
 
@@ -183,7 +184,9 @@ app.whenReady().then(async () => {
   )
 
   if (settings.launchAtStartup) {
-    app.setLoginItemSettings({ openAtLogin: true })
+    try { enableAutoLaunch() } catch (e) {
+      log.warn(`Could not register auto-launch task: ${(e as Error).message}`)
+    }
   }
 
   // ── Server time sync BEFORE scheduler ─────────────────────────────────────
@@ -420,7 +423,12 @@ ipcMain.handle('settings:update', (_e, patch: Partial<AppSettings>) => {
   const updated = { ...current, ...patch }
   store.set('settings', updated)
   if ('launchAtStartup' in patch) {
-    app.setLoginItemSettings({ openAtLogin: updated.launchAtStartup })
+    try {
+      if (updated.launchAtStartup) enableAutoLaunch()
+      else disableAutoLaunch()
+    } catch (e) {
+      log.warn(`Could not update auto-launch task: ${(e as Error).message}`)
+    }
     log.info(`  launchAtStartup → ${updated.launchAtStartup}`)
   }
   if ('theme' in patch) {
