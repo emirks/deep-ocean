@@ -140,14 +140,15 @@ function GatewayFormDialog({
 
           <div className="space-y-1.5">
             <Label>Phrase</Label>
-            <Input
+            <textarea
               value={phrase}
               onChange={e => setPhrase(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && valid && handleSave()}
               placeholder="I will be productive"
+              rows={4}
+              className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring whitespace-pre-wrap break-words"
             />
             <p className="text-xs text-muted-foreground">
-              The exact text that must be typed to pass this gateway.
+              The exact text that must be typed to pass this gateway. Press Enter for a new line.
             </p>
           </div>
         </div>

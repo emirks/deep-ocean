@@ -326,8 +326,8 @@ export function RuleCard({ rule }: Props) {
                     <Lock className="h-3.5 w-3.5 text-purple-400" />
                     <p className="text-sm font-medium text-purple-200">{currentGateway.name}</p>
                   </div>
-                  <div className="rounded-md border border-purple-500/20 bg-purple-500/5 px-4 py-3">
-                    <p className="text-sm font-medium text-purple-200 leading-relaxed">
+                  <div className="rounded-md border border-purple-500/20 bg-purple-500/5 px-4 py-3 select-none">
+                    <p className="text-sm font-medium text-purple-200 leading-relaxed" style={{ userSelect: 'none' }}>
                       "{currentGateway.phrase}"
                     </p>
                   </div>
@@ -341,6 +341,7 @@ export function RuleCard({ rule }: Props) {
                   value={phraseInput}
                   onChange={e => { setPhraseInput(e.target.value); setGatewayError('') }}
                   onKeyDown={e => e.key === 'Enter' && handleGatewayConfirm()}
+                  onPaste={e => e.preventDefault()}
                   className={gatewayError ? 'border-red-500' : ''}
                 />
                 {gatewayError && <p className="text-xs text-red-400">{gatewayError}</p>}
