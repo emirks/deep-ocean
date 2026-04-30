@@ -1,4 +1,4 @@
-import { createRouter, RouterProvider } from '@tanstack/react-router'
+import { createRouter, RouterProvider, createHashHistory } from '@tanstack/react-router'
 import { rootRoute } from './routes/__root'
 import { indexRoute } from './routes/index'
 import { addRuleRoute } from './routes/add-rule'
@@ -7,7 +7,12 @@ import { settingsRoute } from './routes/settings'
 
 const routeTree = rootRoute.addChildren([indexRoute, addRuleRoute, gatewaysRoute, settingsRoute])
 
-const router = createRouter({ routeTree })
+// Hash history is required for Electron production builds: the renderer loads
+// from a file:// URL whose pathname is the full filesystem path, which never
+// matches any route with the default browser history. Hash history stores the
+// route in the URL fragment (#/) so routing works with both file:// and
+// the Vite dev server (http://localhost:../).
+const router = createRouter({ routeTree, history: createHashHistory() })
 
 declare module '@tanstack/react-router' {
   interface Register {
