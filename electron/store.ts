@@ -16,7 +16,8 @@ export const store = new Store<StoreSchema>({
       notifications: true,
       preNotificationMinutes: 5,
       theme: 'system',
-      settingsGatewayId: null
+      settingsGatewayId: null,
+      useServerTime: false
     }
   }
 })
