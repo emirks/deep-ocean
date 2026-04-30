@@ -155,7 +155,7 @@ function RootLayout() {
         <div className="px-3 py-4 border-t border-border">
           <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
             <Shield className="h-3 w-3" />
-            <span>DeepOcean v1.1.0</span>
+            <span>DeepOcean v1.2.0</span>
           </div>
         </div>
       </aside>
