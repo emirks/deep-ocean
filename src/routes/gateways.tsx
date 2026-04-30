@@ -29,9 +29,7 @@ function GatewayCard({
   onEdit: (g: GatewayDef) => void
   onDelete: (g: GatewayDef) => void
 }) {
-  const usageLabels: string[] = []
-  if (usedByCount > 0)  usageLabels.push(`${usedByCount} rule${usedByCount !== 1 ? 's' : ''}`)
-  if (usedBySettings)   usageLabels.push('settings')
+  const isLinked = usedByCount > 0 || usedBySettings
 
   return (
     <div className="flex items-center gap-4 p-4 rounded-lg border border-border bg-card hover:bg-muted/20 transition-colors">
@@ -41,10 +39,10 @@ function GatewayCard({
 
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold">{gateway.name}</p>
-        <p className="text-xs text-muted-foreground mt-0.5 font-mono truncate">
-          "{gateway.phrase}"
+        <p className="text-xs text-muted-foreground mt-0.5 font-mono whitespace-pre-wrap break-words">
+          {gateway.phrase}
         </p>
-        {usageLabels.length > 0 && (
+        {isLinked && (
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             {usedByCount > 0 && (
               <span className="inline-flex items-center gap-1 text-xs text-purple-400/80">
@@ -65,15 +63,19 @@ function GatewayCard({
       <div className="flex items-center gap-1 flex-shrink-0">
         <Button
           variant="ghost" size="icon"
-          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+          className="h-8 w-8 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
           onClick={() => onEdit(gateway)}
+          disabled={isLinked}
+          title={isLinked ? 'Unlink from all rules and settings before editing' : 'Edit gateway'}
         >
           <Edit2 className="h-3.5 w-3.5" />
         </Button>
         <Button
           variant="ghost" size="icon"
-          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+          className="h-8 w-8 text-muted-foreground hover:text-destructive disabled:opacity-30 disabled:cursor-not-allowed"
           onClick={() => onDelete(gateway)}
+          disabled={isLinked}
+          title={isLinked ? 'Unlink from all rules and settings before deleting' : 'Delete gateway'}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
