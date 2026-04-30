@@ -1,7 +1,8 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import path from 'node:path'
+import https from 'node:https'
 import { v4 as uuidv4 } from 'uuid'
-import type { Rule, RuleStatus } from '../types'
+import type { Rule, RuleStatus, GatewayDef, AppSettings } from '../types'
 import { store } from './store'
 import { BlockerEngine } from './blockers/BlockerEngine'
 import { initScheduler, reloadScheduler, isWithinSchedule } from './scheduler'
@@ -31,13 +32,59 @@ function updateStoreStatus(id: string, status: RuleStatus): void {
 function migrateRules(): void {
   const raw = store.get('rules') as any[]
   if (!raw.length) return
-  log.info(`Migrating ${raw.length} rule(s) — ensuring enabled/gateways fields`)
-  const migrated = raw.map((r: any) => ({
-    ...r,
-    enabled:  r.enabled  !== undefined ? r.enabled  : true,
-    gateways: r.gateways !== undefined ? r.gateways : []
-  }))
+  log.info(`Migrating ${raw.length} rule(s) — ensuring enabled/gatewayIds fields`)
+
+  // Migrate inline rule.gateways[] → global GatewayDef entries + rule.gatewayIds[]
+  const globalGateways: GatewayDef[] = (store.get('gateways') as GatewayDef[]) ?? []
+  let gatewaysDirty = false
+
+  const migrated = raw.map((r: any) => {
+    const result: any = {
+      ...r,
+      enabled:    r.enabled    !== undefined ? r.enabled    : true,
+      gatewayIds: r.gatewayIds !== undefined ? r.gatewayIds : []
+    }
+
+    // Promote legacy inline gateways → global (only if gatewayIds not yet set)
+    if (!r.gatewayIds && Array.isArray(r.gateways) && r.gateways.length > 0) {
+      for (const gw of r.gateways) {
+        if (gw?.type === 'phrase' && gw.phrase) {
+          let existing = globalGateways.find((g: GatewayDef) => g.phrase === gw.phrase)
+          if (!existing) {
+            existing = {
+              id: uuidv4(),
+              name: `${r.label} gateway`,
+              phrase: gw.phrase,
+              createdAt: new Date().toISOString()
+            }
+            globalGateways.push(existing)
+            gatewaysDirty = true
+          }
+          if (!result.gatewayIds.includes(existing.id)) {
+            result.gatewayIds.push(existing.id)
+          }
+        }
+      }
+      log.info(`  Promoted ${result.gatewayIds.length} inline gateway(s) for rule "${r.label}"`)
+    }
+
+    // Remove legacy inline field
+    delete result.gateways
+    return result
+  })
+
   store.set('rules', migrated as Rule[])
+  if (gatewaysDirty) {
+    store.set('gateways', globalGateways)
+    log.info(`Migrated ${globalGateways.length} global gateway(s)`)
+  }
+
+  // Ensure settingsGatewayId exists in settings
+  const settings = store.get('settings') as any
+  if (settings.settingsGatewayId === undefined) {
+    store.set('settings', { ...settings, settingsGatewayId: null })
+    log.info('Migrated settings — added settingsGatewayId field')
+  }
 }
 
 /**
@@ -160,8 +207,8 @@ ipcMain.handle('rules:add', async (_e, ruleData: Omit<Rule, 'id' | 'status' | 'c
   const newRule: Rule = {
     ...ruleData,
     id: uuidv4(),
-    enabled:  ruleData.enabled  ?? true,
-    gateways: ruleData.gateways ?? [],
+    enabled:    ruleData.enabled    ?? true,
+    gatewayIds: ruleData.gatewayIds ?? [],
     status: 'unblocked',
     createdAt: new Date().toISOString()
   }
@@ -334,7 +381,7 @@ ipcMain.handle('settings:get', () => {
   return store.get('settings')
 })
 
-ipcMain.handle('settings:update', (_e, patch: Partial<ReturnType<typeof store.get>['settings']>) => {
+ipcMain.handle('settings:update', (_e, patch: Partial<AppSettings>) => {
   log.info(`IPC settings:update — keys: ${Object.keys(patch).join(', ')}`, patch)
   const current = store.get('settings')
   const updated = { ...current, ...patch }
@@ -356,4 +403,91 @@ ipcMain.handle('settings:update', (_e, patch: Partial<ReturnType<typeof store.ge
 ipcMain.handle('shell:open-path', (_e, filePath: string) => {
   log.info(`IPC shell:open-path — "${filePath}"`)
   shell.openPath(filePath)
+})
+
+// ─── IPC: Gateways ─────────────────────────────────────────────────────────────
+
+ipcMain.handle('gateways:get-all', () => {
+  log.debug('IPC gateways:get-all')
+  return store.get('gateways')
+})
+
+ipcMain.handle('gateways:add', (_e, data: Omit<GatewayDef, 'id' | 'createdAt'>) => {
+  const newGw: GatewayDef = {
+    ...data,
+    id: uuidv4(),
+    createdAt: new Date().toISOString()
+  }
+  log.info(`IPC gateways:add — name="${newGw.name}"`)
+  store.set('gateways', [...store.get('gateways'), newGw])
+  return newGw
+})
+
+ipcMain.handle('gateways:update', (_e, data: { id: string } & Partial<GatewayDef>) => {
+  const { id, ...patch } = data
+  const gateways = store.get('gateways')
+  const idx = gateways.findIndex(g => g.id === id)
+  if (idx === -1) throw new Error(`Gateway ${id} not found`)
+  const updated = { ...gateways[idx], ...patch } as GatewayDef
+  gateways[idx] = updated
+  store.set('gateways', gateways)
+  log.info(`IPC gateways:update — id=${id} name="${updated.name}"`)
+  return updated
+})
+
+ipcMain.handle('gateways:remove', (_e, { id }: { id: string }) => {
+  const gateways = store.get('gateways')
+  const gw = gateways.find(g => g.id === id)
+  if (!gw) {
+    log.warn(`IPC gateways:remove — id=${id} not found`)
+    return
+  }
+  store.set('gateways', gateways.filter(g => g.id !== id))
+
+  // Unlink from any rules referencing this gateway
+  const rules = store.get('rules')
+  const updated = rules.map(r => ({
+    ...r,
+    gatewayIds: r.gatewayIds.filter(gid => gid !== id)
+  }))
+  store.set('rules', updated)
+
+  // Unlink from settings if it was the settings gateway
+  const settings = store.get('settings')
+  if (settings.settingsGatewayId === id) {
+    store.set('settings', { ...settings, settingsGatewayId: null })
+    log.info(`IPC gateways:remove — cleared settingsGatewayId (was "${gw.name}")`)
+  }
+
+  log.info(`IPC gateways:remove — "${gw.name}" (${id}) removed`)
+})
+
+// ─── IPC: System ───────────────────────────────────────────────────────────────
+
+ipcMain.handle('system:server-time', async () => {
+  log.debug('IPC system:server-time — fetching from worldtimeapi.org')
+  return new Promise<{ serverTime: string; localTime: string; offsetMs: number }>((resolve, reject) => {
+    const req = https.get('https://worldtimeapi.org/api/timezone/Etc/UTC', { timeout: 8000 }, (res) => {
+      let data = ''
+      res.on('data', (chunk: string) => { data += chunk })
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data)
+          const serverMs: number = json.unixtime * 1000
+          const localMs = Date.now()
+          log.info(`system:server-time — server=${new Date(serverMs).toISOString()} local=${new Date(localMs).toISOString()} offset=${serverMs - localMs}ms`)
+          resolve({
+            serverTime: new Date(serverMs).toISOString(),
+            localTime:  new Date(localMs).toISOString(),
+            offsetMs:   serverMs - localMs
+          })
+        } catch (e) {
+          log.error('system:server-time — parse error:', e)
+          reject(new Error('Failed to parse time response'))
+        }
+      })
+    })
+    req.on('error', (e) => { log.error('system:server-time — request error:', e); reject(e) })
+    req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')) })
+  })
 })

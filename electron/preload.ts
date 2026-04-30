@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import type { Rule, AppSettings, TargetStatus } from '../types'
+import type { Rule, AppSettings, TargetStatus, GatewayDef } from '../types'
 
 const api = {
   // Rules
@@ -36,6 +36,15 @@ const api = {
     ipcRenderer.on('settings:theme-changed', listener)
     return () => ipcRenderer.removeListener('settings:theme-changed', listener)
   },
+
+  // Gateways
+  getGateways:    ():                                                          Promise<GatewayDef[]>   => ipcRenderer.invoke('gateways:get-all'),
+  addGateway:     (data: Omit<GatewayDef, 'id' | 'createdAt'>):               Promise<GatewayDef>     => ipcRenderer.invoke('gateways:add', data),
+  updateGateway:  (data: { id: string } & Partial<GatewayDef>):               Promise<GatewayDef>     => ipcRenderer.invoke('gateways:update', data),
+  removeGateway:  (id: string):                                                Promise<void>           => ipcRenderer.invoke('gateways:remove', { id }),
+
+  // System
+  getServerTime:  (): Promise<{ serverTime: string; localTime: string; offsetMs: number }> => ipcRenderer.invoke('system:server-time'),
 
   // Utilities
   openPath: (p: string): Promise<void> => ipcRenderer.invoke('shell:open-path', p)
