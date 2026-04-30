@@ -18,4 +18,5 @@ export interface IpcChannels {
   'gateways:update':       { args: { id: string } & Partial<GatewayDef>;        result: GatewayDef   }
   'gateways:remove':       { args: { id: string };                               result: void         }
   'system:server-time':    { args: void;                                          result: { serverTime: string; localTime: string; offsetMs: number } }
+  'system:time-status':    { args: void;                                          result: { offsetMs: number; lastSynced: string | null } }
 }

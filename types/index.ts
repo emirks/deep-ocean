@@ -96,6 +96,11 @@ export interface AppSettings {
   /** Minutes before a schedule lock to send a warning notification. 0 = disabled. */
   preNotificationMinutes: number
   theme: 'light' | 'dark' | 'system'
-  /** GatewayDef.id required to access Settings. null = no protection. */
+  /** GatewayDef.id that locks the protected settings section. null = no lock. */
   settingsGatewayId: string | null
+  /**
+   * When true, the scheduler uses server time (via google.com Date header) instead
+   * of local time for schedule checks — prevents clock-rollback bypass.
+   */
+  useServerTime: boolean
 }
