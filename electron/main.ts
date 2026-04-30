@@ -3,7 +3,7 @@ import path from 'node:path'
 import { v4 as uuidv4 } from 'uuid'
 import type { Rule, RuleStatus, GatewayDef, AppSettings } from '../types'
 import { store } from './store'
-import { startPeriodicSync, stopPeriodicSync, fetchAndCacheOffset, getCachedOffsetMs, getLastSyncedAt } from './timeSync'
+import { startPeriodicSync, stopPeriodicSync, fetchAndCacheOffset, getCachedOffsetMs, getLastSyncedAt, getSystemTimezone } from './timeSync'
 import { BlockerEngine } from './blockers/BlockerEngine'
 import { initScheduler, reloadScheduler, isWithinSchedule } from './scheduler'
 import { startProcessMonitor } from './processMonitor'
@@ -523,8 +523,11 @@ ipcMain.handle('system:server-time', async () => {
 /** Return the currently cached offset without a network round-trip. */
 ipcMain.handle('system:time-status', () => {
   const lastSynced = getLastSyncedAt()
+  // Only return a timezone if it was server-detected (from IP via fetchAndCacheOffset).
+  // Empty string means not yet synced — renderer will show "sync to detect".
   return {
     offsetMs:   getCachedOffsetMs(),
-    lastSynced: lastSynced ? lastSynced.toISOString() : null
+    lastSynced: lastSynced ? lastSynced.toISOString() : null,
+    timezone:   getSystemTimezone()   // '' until first successful sync
   }
 })

@@ -5,7 +5,7 @@ import { BlockerEngine } from './blockers/BlockerEngine'
 import { store } from './store'
 import { notify } from './notifications'
 import { createLogger } from './logger'
-import { getAdjustedNow } from './timeSync'
+import { getAdjustedScheduleTime } from './timeSync'
 
 const log = createLogger('Scheduler')
 
@@ -39,18 +39,20 @@ function minutesBefore(time: string, minutes: number): string | null {
 
 /**
  * Exported so main.ts can use it for immediate enable/disable decisions.
- * Uses getAdjustedNow() which applies the server-time offset when useServerTime is on.
+ * Uses getAdjustedScheduleTime() which:
+ *   - applies the server-time offset (corrects clock rollback)
+ *   - formats in the server-detected IANA timezone via Intl (corrects timezone manipulation)
  */
 export function isWithinSchedule(schedules: Schedule[]): boolean {
-  const now = getAdjustedNow()
-  const day = now.getDay()
-  const minutes = now.getHours() * 60 + now.getMinutes()
+  const { day, minutes } = getAdjustedScheduleTime()
   return schedules.some(s => {
     const [lh, lm] = s.lockTime.split(':').map(Number)
     const [uh, um] = s.unlockTime.split(':').map(Number)
     const lockMins   = lh * 60 + lm
     const unlockMins = uh * 60 + um
-    return s.days.includes(day) && minutes >= lockMins && minutes < unlockMins
+    const inWindow   = s.days.includes(day) && minutes >= lockMins && minutes < unlockMins
+    log.debug(`  isWithinSchedule check — day=${day} min=${minutes} window=${s.lockTime}–${s.unlockTime} days=${s.days.join(',')} → ${inWindow}`)
+    return inWindow
   })
 }
 

@@ -44,8 +44,8 @@ const api = {
   removeGateway:  (id: string):                                                Promise<void>           => ipcRenderer.invoke('gateways:remove', { id }),
 
   // System
-  getServerTime:  (): Promise<{ serverTime: string; localTime: string; offsetMs: number }>    => ipcRenderer.invoke('system:server-time'),
-  getTimeStatus:  (): Promise<{ offsetMs: number; lastSynced: string | null }>                 => ipcRenderer.invoke('system:time-status'),
+  getServerTime:  (): Promise<{ serverTime: string; localTime: string; offsetMs: number; timezone: string; source: string }> => ipcRenderer.invoke('system:server-time'),
+  getTimeStatus:  (): Promise<{ offsetMs: number; lastSynced: string | null; timezone: string }>                              => ipcRenderer.invoke('system:time-status'),
 
   // Utilities
   openPath: (p: string): Promise<void> => ipcRenderer.invoke('shell:open-path', p)
