@@ -42,7 +42,7 @@ function migrateRules(): void {
   const migrated = raw.map((r: any) => {
     const result: any = {
       ...r,
-      enabled:    r.enabled    !== undefined ? r.enabled    : true,
+      enabled: r.enabled !== undefined ? r.enabled : true,
       gatewayIds: r.gatewayIds !== undefined ? r.gatewayIds : []
     }
 
@@ -84,7 +84,7 @@ function migrateRules(): void {
   const settings = store.get('settings') as any
   const settingsPatch: Record<string, unknown> = {}
   if (settings.settingsGatewayId === undefined) settingsPatch.settingsGatewayId = null
-  if (settings.useServerTime     === undefined) settingsPatch.useServerTime     = false
+  if (settings.useServerTime === undefined) settingsPatch.useServerTime = false
   if (Object.keys(settingsPatch).length > 0) {
     store.set('settings', { ...settings, ...settingsPatch })
     log.info(`Migrated settings — added fields: ${Object.keys(settingsPatch).join(', ')}`)
@@ -243,7 +243,7 @@ ipcMain.handle('rules:add', async (_e, ruleData: Omit<Rule, 'id' | 'status' | 'c
   const newRule: Rule = {
     ...ruleData,
     id: uuidv4(),
-    enabled:    ruleData.enabled    ?? true,
+    enabled: ruleData.enabled ?? true,
     gatewayIds: ruleData.gatewayIds ?? [],
     status: 'unblocked',
     createdAt: new Date().toISOString()
@@ -534,8 +534,8 @@ ipcMain.handle('system:time-status', () => {
   // Only return a timezone if it was server-detected (from IP via fetchAndCacheOffset).
   // Empty string means not yet synced — renderer will show "sync to detect".
   return {
-    offsetMs:   getCachedOffsetMs(),
+    offsetMs: getCachedOffsetMs(),
     lastSynced: lastSynced ? lastSynced.toISOString() : null,
-    timezone:   getSystemTimezone()   // '' until first successful sync
+    timezone: getSystemTimezone()   // '' until first successful sync
   }
 })
