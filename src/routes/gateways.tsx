@@ -9,7 +9,8 @@ import {
 } from '@/components/ui/dialog'
 import { useGatewaysStore } from '@/stores/gatewaysStore'
 import { useRulesStore } from '@/stores/rulesStore'
-import { ShieldCheck, Plus, Trash2, Edit2, Lock, AlertTriangle } from 'lucide-react'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { ShieldCheck, Plus, Trash2, Edit2, Lock, AlertTriangle, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { GatewayDef } from '../../types'
 
@@ -18,14 +19,20 @@ import type { GatewayDef } from '../../types'
 function GatewayCard({
   gateway,
   usedByCount,
+  usedBySettings,
   onEdit,
   onDelete
 }: {
   gateway: GatewayDef
   usedByCount: number
+  usedBySettings: boolean
   onEdit: (g: GatewayDef) => void
   onDelete: (g: GatewayDef) => void
 }) {
+  const usageLabels: string[] = []
+  if (usedByCount > 0)  usageLabels.push(`${usedByCount} rule${usedByCount !== 1 ? 's' : ''}`)
+  if (usedBySettings)   usageLabels.push('settings')
+
   return (
     <div className="flex items-center gap-4 p-4 rounded-lg border border-border bg-card hover:bg-muted/20 transition-colors">
       <div className="flex-shrink-0 p-2 rounded-md bg-purple-500/10">
@@ -37,10 +44,21 @@ function GatewayCard({
         <p className="text-xs text-muted-foreground mt-0.5 font-mono truncate">
           "{gateway.phrase}"
         </p>
-        {usedByCount > 0 && (
-          <p className="text-xs text-purple-400/80 mt-1">
-            Used by {usedByCount} rule{usedByCount !== 1 ? 's' : ''}
-          </p>
+        {usageLabels.length > 0 && (
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            {usedByCount > 0 && (
+              <span className="inline-flex items-center gap-1 text-xs text-purple-400/80">
+                <Lock className="h-2.5 w-2.5" />
+                {usedByCount} rule{usedByCount !== 1 ? 's' : ''}
+              </span>
+            )}
+            {usedBySettings && (
+              <span className="inline-flex items-center gap-1 text-xs text-purple-400/80">
+                <Settings className="h-2.5 w-2.5" />
+                settings
+              </span>
+            )}
+          </div>
         )}
       </div>
 
@@ -150,14 +168,20 @@ function GatewayFormDialog({
 function DeleteConfirmDialog({
   gateway,
   usedByCount,
+  usedBySettings,
   onConfirm,
   onCancel
 }: {
   gateway: GatewayDef | null
   usedByCount: number
+  usedBySettings: boolean
   onConfirm: () => void
   onCancel: () => void
 }) {
+  const usageLabels: string[] = []
+  if (usedByCount > 0) usageLabels.push(`${usedByCount} rule${usedByCount !== 1 ? 's' : ''}`)
+  if (usedBySettings)  usageLabels.push('the settings lock')
+
   return (
     <Dialog open={!!gateway} onOpenChange={v => { if (!v) onCancel() }}>
       <DialogContent>
@@ -172,11 +196,12 @@ function DeleteConfirmDialog({
           <p className="text-sm text-muted-foreground">
             Delete <strong className="text-foreground">"{gateway?.name}"</strong>?
           </p>
-          {usedByCount > 0 && (
+          {usageLabels.length > 0 && (
             <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 flex items-start gap-2">
               <AlertTriangle className="h-4 w-4 text-amber-400 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-amber-300">
-                This gateway is assigned to <strong>{usedByCount} rule{usedByCount !== 1 ? 's' : ''}</strong>.
+                This gateway is currently used by{' '}
+                <strong>{usageLabels.join(' and ')}</strong>.
                 It will be automatically unlinked when deleted.
               </p>
             </div>
@@ -196,14 +221,15 @@ function DeleteConfirmDialog({
 
 function GatewaysPage() {
   const { gateways, addGateway, updateGateway, removeGateway } = useGatewaysStore()
-  const rules = useRulesStore(s => s.rules)
+  const rules             = useRulesStore(s => s.rules)
+  const settingsGatewayId = useSettingsStore(s => s.settingsGatewayId)
 
-  const [formOpen,    setFormOpen]    = useState(false)
-  const [editTarget,  setEditTarget]  = useState<GatewayDef | undefined>()
-  const [deleteTarget, setDeleteTarget] = useState<GatewayDef | null>(null)
+  const [formOpen,      setFormOpen]      = useState(false)
+  const [editTarget,    setEditTarget]    = useState<GatewayDef | undefined>()
+  const [deleteTarget,  setDeleteTarget]  = useState<GatewayDef | null>(null)
 
-  const usageCount = (id: string) =>
-    rules.filter(r => r.gatewayIds?.includes(id)).length
+  const usageCount    = (id: string) => rules.filter(r => r.gatewayIds?.includes(id)).length
+  const usedBySettings = (id: string) => id === settingsGatewayId
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -290,6 +316,7 @@ function GatewaysPage() {
                   key={gw.id}
                   gateway={gw}
                   usedByCount={usageCount(gw.id)}
+                  usedBySettings={usedBySettings(gw.id)}
                   onEdit={openEdit}
                   onDelete={openDelete}
                 />
@@ -309,6 +336,7 @@ function GatewaysPage() {
       <DeleteConfirmDialog
         gateway={deleteTarget}
         usedByCount={deleteTarget ? usageCount(deleteTarget.id) : 0}
+        usedBySettings={deleteTarget ? usedBySettings(deleteTarget.id) : false}
         onConfirm={confirmDelete}
         onCancel={() => setDeleteTarget(null)}
       />
